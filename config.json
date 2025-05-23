@@ -1,8 +1,20 @@
 {
     "aiu": {
         "administracion": 7,
-        "imprevistos": 5,
+        "imprevistos": 3,
         "utilidad": 5,
         "iva_sobre_utilidad": 19
+    },
+    "email": {
+        "smtp_server": "smtp.gmail.com",
+        "smtp_port": 587,
+        "smtp_user": "fabiox790@gmail.com",
+        "smtp_password": "rjhf jkuq bjnp ucwv ",
+        "default_sender": "fabiox790@gmail.com",
+        "default_recipients": [
+            "deivid790@gmail.com"
+        ],
+        "default_subject": "Cotizacon",
+        "default_message": "Adjunto encontrar\u00c3\u00a1 la cotizaci\u00c3\u00b3n solicitada."
     }
 }

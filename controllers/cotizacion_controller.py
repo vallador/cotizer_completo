@@ -6,6 +6,7 @@ from models.actividad import Actividad
 from models.producto import Producto
 from utils.database_manager import DatabaseManager
 from utils.aiu_manager import AIUManager
+from utils.filter_manager import FilterManager
 from typing import List, Dict
 import datetime
 import os
@@ -17,6 +18,7 @@ class CotizacionController:
         self.database_manager = DatabaseManager('data/cotizaciones.db')
         self.database_manager.connect()
         self.aiu_manager = AIUManager()
+        self.filter_manager = FilterManager(self.database_manager)
         self.cargar_configuracion()
 
     def cargar_configuracion(self):
@@ -33,6 +35,8 @@ class CotizacionController:
                             config['aiu'].get('utilidad', 5),
                             config['aiu'].get('iva_sobre_utilidad', 19)
                         )
+                    if 'email' in config:
+                        self.email_config = config['email']
             except Exception as e:
                 print(f"Error al cargar la configuración: {e}")
                 # Usar valores predeterminados si hay error
@@ -124,7 +128,7 @@ class CotizacionController:
                 'actividad_id': actividad.id if hasattr(actividad, 'id') else None,
                 'cantidad': actividad.cantidad,
                 'valor_unitario': actividad.valor_unitario,
-                'total': actividad.valor_total
+                'total': actividad.calcular_total()  # Usar el método en lugar de la propiedad
             })
         
         # Guardar en la base de datos
@@ -194,6 +198,14 @@ class CotizacionController:
     def get_all_activities(self):
         """Obtiene todas las actividades de la base de datos"""
         return self.database_manager.get_all_activities()
+    
+    def get_all_products(self):
+        """Obtiene todos los productos de la base de datos"""
+        return self.database_manager.get_all_products()
+    
+    def get_all_categories(self):
+        """Obtiene todas las categorías de la base de datos"""
+        return self.database_manager.get_all_categories()
 
     def add_activity(self, activity_data):
         """Añade una actividad a la base de datos"""
@@ -223,9 +235,9 @@ class CotizacionController:
                 descripcion=act['descripcion'],
                 unidad=act['unidad'],
                 valor_unitario=float(act['valor_unitario']),
-                cantidad=float(act['cantidad'])
+                cantidad=float(act['cantidad']),
+                id=act.get('id')
             )
-            actividad.calcular_total()
             actividades_obj.append(actividad)
         
         # Valores AIU
@@ -257,6 +269,83 @@ class CotizacionController:
             'total': cotizacion.total,
             'desglose': cotizacion.obtener_desglose()
         }
+    
+    # Métodos para filtrado y relaciones
+    def search_activities(self, search_text, category_id=None):
+        """
+        Busca actividades que coincidan con el texto de búsqueda y opcionalmente
+        filtra por categoría.
+        
+        Args:
+            search_text: Texto a buscar en las descripciones de actividades
+            category_id: ID de categoría para filtrar (opcional)
+            
+        Returns:
+            Lista de actividades que coinciden con los criterios de búsqueda
+        """
+        return self.filter_manager.search_activities(search_text, category_id)
+    
+    def search_products(self, search_text, category_id=None):
+        """
+        Busca productos que coincidan con el texto de búsqueda y opcionalmente
+        filtra por categoría.
+        
+        Args:
+            search_text: Texto a buscar en los nombres y descripciones de productos
+            category_id: ID de categoría para filtrar (opcional)
+            
+        Returns:
+            Lista de productos que coinciden con los criterios de búsqueda
+        """
+        return self.filter_manager.search_products(search_text, category_id)
+    
+    def get_related_activities(self, activity_id):
+        """
+        Obtiene las actividades relacionadas con una actividad específica.
+        
+        Args:
+            activity_id: ID de la actividad principal
+            
+        Returns:
+            Lista de actividades relacionadas
+        """
+        return self.filter_manager.get_related_activities(activity_id)
+    
+    def suggest_activities(self, context):
+        """
+        Sugiere actividades basadas en un contexto (por ejemplo, "pintura").
+        
+        Args:
+            context: Contexto para sugerir actividades
+            
+        Returns:
+            Lista de actividades sugeridas
+        """
+        return self.filter_manager.suggest_activities(context)
+    
+    def get_products_for_activity(self, activity_id):
+        """
+        Obtiene los productos asociados a una actividad específica.
+        
+        Args:
+            activity_id: ID de la actividad
+            
+        Returns:
+            Lista de productos asociados a la actividad
+        """
+        return self.filter_manager.get_products_for_activity(activity_id)
+    
+    def get_activity_suggestions_for_voice(self, context):
+        """
+        Obtiene sugerencias de actividades optimizadas para reconocimiento de voz.
+        
+        Args:
+            context: Contexto o frase reconocida por voz
+            
+        Returns:
+            Lista de actividades sugeridas
+        """
+        return self.filter_manager.get_activity_suggestions_for_voice(context)
 
     def disconnect(self):
         """Desconecta de la base de datos"""
