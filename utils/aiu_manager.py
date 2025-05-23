@@ -30,3 +30,8 @@ class AIUManager:
             'utilidad': self.utilidad,
             'iva_sobre_utilidad': self.iva_sobre_utilidad
         }
+        
+    # Método alternativo con nombre más consistente con el resto del código
+    def get_aiu_values(self):
+        """Alias para obtener_aiu para mantener consistencia con el resto del código."""
+        return self.obtener_aiu()

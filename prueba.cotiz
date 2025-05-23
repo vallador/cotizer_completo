@@ -1,0 +1,42 @@
+{
+    "fecha": "2025-05-22",
+    "cliente": {
+        "id": 1,
+        "nombre": "Juan Pérez",
+        "tipo": "natural",
+        "direccion": "Calle 123 #45-67",
+        "nit": null,
+        "telefono": "3101234567",
+        "email": "juan@example.com"
+    },
+    "actividades": [
+        {
+            "descripcion": "Pintura interior",
+            "cantidad": 1.0,
+            "unidad": "m²",
+            "valor_unitario": 15000.0,
+            "total": 15000.0,
+            "id": 1
+        },
+        {
+            "descripcion": "Pintura exterior",
+            "cantidad": 1.0,
+            "unidad": "m²",
+            "valor_unitario": 18000.0,
+            "total": 18000.0,
+            "id": 2
+        }
+    ],
+    "subtotal": 33000.0,
+    "administracion": 2310.0,
+    "imprevistos": 990.0,
+    "utilidad": 1650.0,
+    "iva_utilidad": 313.5,
+    "total": 38263.5,
+    "aiu_values": {
+        "administracion": 7,
+        "imprevistos": 3,
+        "utilidad": 5,
+        "iva_sobre_utilidad": 19
+    }
+}
