@@ -12,6 +12,7 @@ class CotizacionFileDialog(QDialog):
         super().__init__(parent)
         self.controller = controller
         self.file_manager = CotizacionFileManager()
+        self.selected_cotizacion = None
         
         self.setWindowTitle("Gestión de Archivos de Cotización")
         self.setGeometry(200, 200, 700, 500)
@@ -95,11 +96,14 @@ class CotizacionFileDialog(QDialog):
         selected_items = self.cotizaciones_list.selectedItems()
         if not selected_items:
             self.info_label.setText("Seleccione una cotización para ver detalles")
+            self.selected_cotizacion = None
             return
             
         filepath = selected_items[0].data(Qt.UserRole)
         try:
             cotizacion = self.file_manager.cargar_cotizacion(filepath)
+            self.selected_cotizacion = cotizacion  # Guardar la cotización seleccionada
+            
             cliente = cotizacion.get('cliente', {}).get('nombre', 'Desconocido')
             fecha = cotizacion.get('fecha', 'Desconocida')
             numero = cotizacion.get('numero', '000')
@@ -110,6 +114,25 @@ class CotizacionFileDialog(QDialog):
             self.info_label.setText(info_text)
         except Exception as e:
             self.info_label.setText(f"Error al cargar información: {str(e)}")
+            self.selected_cotizacion = None
+    
+    def get_selected_cotizacion(self):
+        """
+        Devuelve la cotización seleccionada actualmente.
+        
+        Returns:
+            dict: Datos de la cotización seleccionada o None si no hay selección
+        """
+        selected_items = self.cotizaciones_list.selectedItems()
+        if not selected_items:
+            return None
+            
+        filepath = selected_items[0].data(Qt.UserRole)
+        try:
+            return self.file_manager.cargar_cotizacion(filepath)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error al obtener la cotización seleccionada: {str(e)}")
+            return None
     
     def open_cotizacion(self):
         """Abre la cotización seleccionada para edición"""
@@ -121,6 +144,7 @@ class CotizacionFileDialog(QDialog):
         filepath = selected_items[0].data(Qt.UserRole)
         try:
             cotizacion = self.file_manager.cargar_cotizacion(filepath)
+            self.selected_cotizacion = cotizacion  # Guardar la cotización seleccionada
             
             # Enviar la cotización al controlador para cargarla en la interfaz
             self.controller.load_cotizacion_from_file(cotizacion)
@@ -153,7 +177,7 @@ class CotizacionFileDialog(QDialog):
     def import_cotizacion(self):
         """Importa una cotización desde un archivo JSON externo"""
         filepath, _ = QFileDialog.getOpenFileName(
-            self, "Importar Cotización", "", "Archivos JSON (*.json)"
+            self, "Importar Cotización", "", "Archivos JSON (*.json);;Archivos de Cotización (*.cotiz);;Todos los archivos (*)"
         )
         
         if not filepath:
@@ -162,6 +186,7 @@ class CotizacionFileDialog(QDialog):
         try:
             # Cargar el archivo
             cotizacion = self.file_manager.cargar_cotizacion(filepath)
+            self.selected_cotizacion = cotizacion  # Guardar la cotización seleccionada
             
             # Copiar al directorio de cotizaciones
             new_filepath = self.file_manager.guardar_cotizacion(cotizacion)
@@ -184,7 +209,7 @@ class CotizacionFileDialog(QDialog):
         
         # Solicitar ubicación para guardar
         save_path, _ = QFileDialog.getSaveFileName(
-            self, "Exportar Cotización", os.path.basename(filepath), "Archivos JSON (*.json)"
+            self, "Exportar Cotización", os.path.basename(filepath), "Archivos JSON (*.json);;Archivos de Cotización (*.cotiz)"
         )
         
         if not save_path:
@@ -224,5 +249,6 @@ class CotizacionFileDialog(QDialog):
                 os.remove(filepath)
                 QMessageBox.information(self, "Éxito", "Cotización eliminada correctamente.")
                 self.load_cotizaciones()
+                self.selected_cotizacion = None  # Limpiar la cotización seleccionada
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Error al eliminar la cotización: {str(e)}")

@@ -3,7 +3,6 @@ import sys
 from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
 from views.main_window import MainWindow
 from controllers.cotizacion_controller import CotizacionController
-from utils.voice_recognition import VoiceRecognition
 
 def main():
     """Función principal que inicia la aplicación"""
@@ -32,9 +31,7 @@ def main():
     main_window = MainWindow(controller)
     main_window.show()
     
-    # Iniciar el reconocimiento de voz (desactivado por defecto)
-    # voice = VoiceRecognition(main_window, controller)
-    # voice.start()
+
     
     # Ejecutar la aplicación
     sys.exit(app.exec_())

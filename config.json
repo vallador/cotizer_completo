@@ -8,11 +8,13 @@
     "email": {
         "smtp_server": "smtp.gmail.com",
         "smtp_port": 587,
-        "smtp_user": "",
-        "smtp_password": "",
-        "default_sender": "",
-        "default_recipients": [],
-        "default_subject": "Cotización",
-        "default_message": "Adjunto encontrará la cotización solicitada."
+        "smtp_user": "fabiox790@gmail.com",
+        "smtp_password": "qbjaqlzqiimznldw",
+        "default_sender": "fabiox790@gmail.com",
+        "default_recipients": [
+            "deivid9706@gmail.com"
+        ],
+        "default_subject": "Cotizaci\u00c3\u00b3n",
+        "default_message": "Adjunto encontrar\u00c3\u00a1 la cotizaci\u00c3\u00b3n solicitada."
     }
 }
