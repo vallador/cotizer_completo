@@ -224,6 +224,13 @@ class MainWindow(QMainWindow):
 
         selection_layout.addLayout(filter_layout)
 
+        # Selección de Capítulos
+        chapter_layout = QVBoxLayout()
+        chapter_layout.addWidget(QLabel("Capitulo:"))
+        self.chapter_combo = QComboBox()
+        self.chapter_combo.currentIndexChanged.connect(self.chapter_selected)
+        chapter_layout.addWidget(self.chapter_combo)
+
         # Selección de actividad predefinida
         predefined_layout = QVBoxLayout()
 
@@ -262,7 +269,7 @@ class MainWindow(QMainWindow):
 
         # Cantidad para actividad predefinida
         pred_quantity_layout = QHBoxLayout()
-        pred_quantity_layout.addWidget(QLabel("Cantidad:"))
+        pred_quantity_layout.addWidget(QLabel("cantidad:"))
         self.pred_quantity_spinbox = QDoubleSpinBox()
         self.pred_quantity_spinbox.setMinimum(0.01)
         self.pred_quantity_spinbox.setMaximum(9999.99)
@@ -746,6 +753,54 @@ class MainWindow(QMainWindow):
             self.update_related_activities()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error al filtrar actividades: {str(e)}")
+
+    def chapter_selected(self):
+        """Filtra las actividades según el capítulo seleccionado"""
+        try:
+            # Obtener capítulo seleccionado
+            chapter_id = self.chapter_combo.currentData()
+
+            if chapter_id is None:
+                return
+
+            # Buscar actividades del capítulo seleccionado
+            activities = self.controller.get_activities_by_chapter(chapter_id)
+
+            # Guardar la actividad seleccionada actualmente
+            current_activity_id = self.activity_combo.currentData()
+
+            # Limpiar el combo de actividades
+            self.activity_combo.clear()
+
+            # Agregar las actividades filtradas
+            for activity in activities:
+                self.activity_combo.addItem(activity['descripcion'], activity['id'])
+
+            # Restaurar la selección anterior si existe
+            if current_activity_id:
+                index = self.activity_combo.findData(current_activity_id)
+                if index >= 0:
+                    self.activity_combo.setCurrentIndex(index)
+
+            # Actualizar la descripción de la actividad
+            self.update_activity_description()
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error al filtrar actividades: {str(e)}")
+
+    def load_chapters(self):
+        """Carga los capítulos desde la base de datos"""
+        try:
+            chapters = self.controller.get_all_chapters()
+
+            self.chapter_combo.clear()
+            self.chapter_combo.addItem("Seleccionar capítulo...", None)
+
+            for chapter in chapters:
+                self.chapter_combo.addItem(chapter['nombre'], chapter['id'])  # Acceso como diccionario
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error al cargar capítulos: {str(e)}")
 
     def add_selected_activity(self):
         """Agrega la actividad seleccionada a la tabla"""

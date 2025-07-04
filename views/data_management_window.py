@@ -11,7 +11,7 @@ class DataManagementWindow(QMainWindow):
         self.controller = controller
         self.filter_manager = FilterManager(controller.database_manager)
         self.setWindowTitle("Gestión de Datos")
-        self.setGeometry(150, 150, 900, 700)
+        self.setGeometry(150, 150, 700, 600)
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -166,6 +166,8 @@ class DataManagementWindow(QMainWindow):
 
         # Lista de actividades existentes
         self.activity_list = QListWidget()
+        self.activity_list.setWordWrap(True)
+        self.activity_list.setMaximumWidth(700)
         self.activity_list.itemClicked.connect(self.activity_selected)
 
         layout.addWidget(QLabel("Lista de Actividades:"))
@@ -563,13 +565,16 @@ class DataManagementWindow(QMainWindow):
         self.activity_unit_input.clear()
         self.activity_price_input.setValue(0)
         self.activity_category_select.setCurrentIndex(0)
-    
+
     def refresh_activity_list(self):
         try:
             self.activity_list.clear()
             activities = self.controller.get_all_activities()
             for activity in activities:
-                item = QListWidgetItem(f"{activity['descripcion']} ({activity['unidad']} - ${activity['valor_unitario']})")
+                # Formato en múltiples líneas
+                text = f"{activity['descripcion']}\n   📏 {activity['unidad']} | 💰 ${activity['valor_unitario']:,.2f}"
+
+                item = QListWidgetItem(text)
                 item.setData(Qt.UserRole, activity['id'])
                 self.activity_list.addItem(item)
         except Exception as e:
@@ -584,7 +589,8 @@ class DataManagementWindow(QMainWindow):
             activities = self.controller.search_activities(search_text, category_id)
             
             for activity in activities:
-                item = QListWidgetItem(f"{activity['descripcion']} ({activity['unidad']} - ${activity['valor_unitario']})")
+                text = f"{activity['descripcion']}\n   📏 {activity['unidad']} | 💰 ${activity['valor_unitario']:,.2f}"
+                item = QListWidgetItem(text)
                 item.setData(Qt.UserRole, activity['id'])
                 self.activity_list.addItem(item)
         except Exception as e:
@@ -868,7 +874,12 @@ class DataManagementWindow(QMainWindow):
             # Agregar las actividades
             activities = self.controller.get_all_activities()
             for activity in activities:
-                combo.addItem(f"{activity['descripcion']} ({activity['unidad']} - ${activity['valor_unitario']})", activity['id'])
+                description = activity['descripcion']
+                if len(description) > 60:
+                    description = description[:37] + "..."
+
+                text = f"{description} ({activity['unidad']} - ${activity['valor_unitario']:,.2f})"
+                combo.addItem(text, activity['id'])
             
             # Restaurar el ítem seleccionado si existe
             if current_data is not None:
@@ -915,7 +926,8 @@ class DataManagementWindow(QMainWindow):
             related_activities = self.controller.get_related_activities(activity_id)
             
             for activity in related_activities:
-                item = QListWidgetItem(f"{activity['descripcion']} ({activity['unidad']} - ${activity['valor_unitario']})")
+                text = f"{activity['descripcion']}\n   📏 {activity['unidad']} | 💰 ${activity['valor_unitario']:,.2f}"
+                item = QListWidgetItem(text)
                 item.setData(Qt.UserRole, activity['id'])
                 item.setData(Qt.UserRole + 1, activity.get('relation_id'))
                 self.related_activities_list.addItem(item)
