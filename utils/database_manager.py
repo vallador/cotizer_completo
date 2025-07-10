@@ -423,3 +423,112 @@ class DatabaseManager:
         except Exception as e:
             print(f"Error al obtener capítulo por ID: {str(e)}")
             return None
+
+    def add_product(self, product_data):
+        """Agrega un nuevo producto a la base de datos."""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute(
+                "INSERT INTO productos (nombre, descripcion, unidad, precio_unitario, categoria_id) VALUES (?, ?, ?, ?, ?)",
+                (product_data['nombre'], product_data['descripcion'], product_data['unidad'],
+                 product_data['precio_unitario'], product_data.get('categoria_id'))
+            )
+            self.connection.commit()
+            return cursor.lastrowid
+        except sqlite3.Error as e:
+            print(f"Error al agregar producto: {e}")
+            return None
+
+    def get_all_products(self):
+        """Obtiene todos los productos de la base de datos."""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("SELECT id, nombre, unidad, precio_unitario FROM productos")
+            return [{'id': r[0], 'nombre': r[1], 'unidad': r[2], 'precio_unitario': r[3]} for r in cursor.fetchall()]
+        except sqlite3.Error as e:
+            print(f"Error al obtener productos: {e}")
+            return []
+
+    def get_product_by_id(self, product_id):
+        """Obtiene un producto por su ID."""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("SELECT * FROM productos WHERE id = ?", (product_id,))
+            row = cursor.fetchone()
+            # Asumiendo que las columnas son id, nombre, descripcion, unidad, precio_unitario, categoria_id
+            if row:
+                return {'id': row[0], 'nombre': row[1], 'descripcion': row[2], 'unidad': row[3],
+                        'precio_unitario': row[4], 'categoria_id': row[5]}
+            return None
+        except sqlite3.Error as e:
+            print(f"Error al obtener producto por ID: {e}")
+            return None
+
+    def update_product(self, product_id, product_data):
+        """Actualiza un producto existente."""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("""
+                UPDATE productos SET nombre = ?, descripcion = ?, unidad = ?, precio_unitario = ?, categoria_id = ?
+                WHERE id = ?
+            """, (product_data['nombre'], product_data['descripcion'], product_data['unidad'],
+                  product_data['precio_unitario'], product_data.get('categoria_id'), product_id))
+            self.connection.commit()
+            return True
+        except sqlite3.Error as e:
+            print(f"Error al actualizar producto: {e}")
+            return False
+
+    def delete_product(self, product_id):
+        """Elimina un producto."""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("DELETE FROM productos WHERE id = ?", (product_id,))
+            self.connection.commit()
+            return True
+        except sqlite3.Error as e:
+            print(f"Error al eliminar producto: {e}")
+            return False
+
+    # --- MÉTODOS PARA RELACIONES ---
+
+    def add_activity_product(self, activity_id, product_id, quantity):
+        """Crea una relación entre una actividad y un producto."""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute(
+                "INSERT INTO actividad_producto (actividad_id, producto_id, cantidad) VALUES (?, ?, ?)",
+                (activity_id, product_id, quantity)
+            )
+            self.connection.commit()
+            return cursor.lastrowid
+        except sqlite3.Error as e:
+            print(f"Error al agregar relación actividad-producto: {e}")
+            return None
+
+    def delete_activity_product(self, relation_id):
+        """Elimina una relación actividad-producto por su ID."""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("DELETE FROM actividad_producto WHERE id = ?", (relation_id,))
+            self.connection.commit()
+            return True
+        except sqlite3.Error as e:
+            print(f"Error al eliminar relación actividad-producto: {e}")
+            return False
+
+    def get_products_by_activity(self, activity_id):
+        """Obtiene los productos y sus cantidades para una actividad específica."""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("""
+                SELECT p.id, p.nombre, p.unidad, p.precio_unitario, ap.cantidad, ap.id as relation_id
+                FROM productos p
+                JOIN actividad_producto ap ON p.id = ap.producto_id
+                WHERE ap.actividad_id = ?
+            """, (activity_id,))
+            return [{'id': r[0], 'nombre': r[1], 'unidad': r[2], 'precio_unitario': r[3],
+                     'cantidad': r[4], 'relation_id': r[5]} for r in cursor.fetchall()]
+        except sqlite3.Error as e:
+            print(f"Error al obtener productos por actividad: {e}")
+            return []

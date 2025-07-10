@@ -58,6 +58,12 @@ class CotizacionController:
         """Obtiene todas las categorías de la base de datos"""
         return self.database_manager.get_all_categories()
 
+    def get_all_products(self):
+        return self.database_manager.get_all_products()
+
+    def search_products(self, search_text, category_id=None):
+        return self.filter_manager.search_products(search_text, category_id)
+
     # --- Métodos que delegan en otros managers ---
 
     def search_activities(self, search_text, category_id=None):

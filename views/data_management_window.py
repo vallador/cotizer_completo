@@ -1,4 +1,8 @@
-from PyQt5.QtWidgets import QMainWindow, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget, QPushButton, QLineEdit, QFormLayout, QListWidget, QListWidgetItem, QMessageBox, QDoubleSpinBox, QComboBox, QLabel, QGroupBox, QSplitter, QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox, QRadioButton, QButtonGroup
+from PyQt5.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget,
+                             QPushButton, QLineEdit, QFormLayout, QListWidget, QListWidgetItem,
+                             QMessageBox, QDoubleSpinBox, QComboBox, QLabel, QGroupBox,
+                             QSplitter, QTableWidget, QTableWidgetItem, QHeaderView,
+                             QCheckBox, QRadioButton, QButtonGroup, QAbstractItemView)
 from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot
 from utils.filter_manager import FilterManager
 
@@ -24,6 +28,8 @@ class DataManagementWindow(QMainWindow):
         self.tab_widget.addTab(self.setup_product_tab(), "Productos")
         self.tab_widget.addTab(self.setup_category_tab(), "Categorías")
         self.tab_widget.addTab(self.setup_relations_tab(), "Relaciones")
+        self.tab_widget.addTab(self.setup_chapters_tab(), "Capítulos")
+        self.tab_widget.addTab(self.setup_aiu_tab(), "Configuración AIU")
 
         main_layout.addWidget(self.tab_widget)
         
@@ -1063,3 +1069,140 @@ class DataManagementWindow(QMainWindow):
                     self.refresh_related_products_list(activity_id)
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error al eliminar relación: {str(e)}")
+
+    def setup_chapters_tab(self):
+        chapter_widget = QWidget()
+        main_layout = QHBoxLayout(chapter_widget)
+
+        table_layout = QVBoxLayout()
+        self.chapters_table = QTableWidget()
+        self.chapters_table.setColumnCount(2)
+        self.chapters_table.setHorizontalHeaderLabels(["ID", "Nombre del Capítulo"])
+        self.chapters_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.chapters_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.chapters_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.chapters_table.itemSelectionChanged.connect(self.load_chapter_to_form)
+        table_layout.addWidget(self.chapters_table)
+
+        form_layout = QFormLayout()
+        self.chapter_id_label = QLineEdit()
+        self.chapter_id_label.setReadOnly(True)
+        self.chapter_name_input = QLineEdit()
+
+        form_layout.addRow("ID:", self.chapter_id_label)
+        form_layout.addRow("Nombre:", self.chapter_name_input)
+
+        buttons_layout = QHBoxLayout()
+        self.save_chapter_btn = QPushButton("Guardar");
+        self.save_chapter_btn.clicked.connect(self.save_chapter)
+        self.new_chapter_btn = QPushButton("Nuevo");
+        self.new_chapter_btn.clicked.connect(self.clear_chapter_form)
+        self.delete_chapter_btn = QPushButton("Eliminar");
+        self.delete_chapter_btn.clicked.connect(self.delete_chapter)
+
+        buttons_layout.addWidget(self.save_chapter_btn)
+        buttons_layout.addWidget(self.new_chapter_btn)
+        buttons_layout.addWidget(self.delete_chapter_btn)
+
+        right_panel = QVBoxLayout()
+        right_panel.addLayout(form_layout)
+        right_panel.addLayout(buttons_layout)
+        right_panel.addStretch()
+
+        main_layout.addLayout(table_layout, 2)
+        main_layout.addLayout(right_panel, 1)
+
+        self.refresh_chapters_table()
+        return chapter_widget
+
+    def refresh_chapters_table(self):
+        # Necesitarás añadir get_all_chapters al controller
+        chapters = self.controller.get_all_chapters()
+        self.chapters_table.setRowCount(0)
+        for chapter in chapters:
+            row = self.chapters_table.rowCount()
+            self.chapters_table.insertRow(row)
+            self.chapters_table.setItem(row, 0, QTableWidgetItem(str(chapter['id'])))
+            self.chapters_table.setItem(row, 1, QTableWidgetItem(chapter['nombre']))
+        self.clear_chapter_form()
+
+    def load_chapter_to_form(self):
+        selected_rows = self.chapters_table.selectionModel().selectedRows()
+        if not selected_rows: return
+        row = selected_rows[0].row()
+        self.chapter_id_label.setText(self.chapters_table.item(row, 0).text())
+        self.chapter_name_input.setText(self.chapters_table.item(row, 1).text())
+
+    def clear_chapter_form(self):
+        self.chapters_table.clearSelection()
+        self.chapter_id_label.clear()
+        self.chapter_name_input.clear()
+
+    def save_chapter(self):
+        # Lógica para guardar o actualizar un capítulo (necesitarás los métodos en el controller/manager)
+        QMessageBox.information(self, "Info",
+                                "Funcionalidad para guardar capítulo pendiente de implementación en el controlador.")
+        self.refresh_chapters_table()
+
+    def delete_chapter(self):
+        # Lógica para eliminar un capítulo
+        QMessageBox.information(self, "Info",
+                                "Funcionalidad para eliminar capítulo pendiente de implementación en el controlador.")
+        self.refresh_chapters_table()
+
+        # --- PESTAÑA PARA GESTIONAR AIU ---
+
+    def setup_aiu_tab(self):
+        aiu_widget = QWidget()
+        layout = QVBoxLayout(aiu_widget)
+        form_layout = QFormLayout()
+
+        self.admin_spinbox = QDoubleSpinBox();
+        self.admin_spinbox.setSuffix(" %");
+        self.admin_spinbox.setRange(0, 100)
+        self.imprev_spinbox = QDoubleSpinBox();
+        self.imprev_spinbox.setSuffix(" %");
+        self.imprev_spinbox.setRange(0, 100)
+        self.util_spinbox = QDoubleSpinBox();
+        self.util_spinbox.setSuffix(" %");
+        self.util_spinbox.setRange(0, 100)
+        self.iva_spinbox = QDoubleSpinBox();
+        self.iva_spinbox.setSuffix(" %");
+        self.iva_spinbox.setRange(0, 100)
+
+        form_layout.addRow("Administración:", self.admin_spinbox)
+        form_layout.addRow("Imprevistos:", self.imprev_spinbox)
+        form_layout.addRow("Utilidad:", self.util_spinbox)
+        form_layout.addRow("IVA sobre Utilidad:", self.iva_spinbox)
+
+        save_button = QPushButton("Guardar Valores AIU")
+        save_button.clicked.connect(self.save_aiu_values)
+
+        layout.addLayout(form_layout)
+        layout.addWidget(save_button)
+        layout.addStretch()
+
+        self.load_aiu_values()
+        return aiu_widget
+
+    def load_aiu_values(self):
+        aiu_values = self.controller.aiu_manager.get_aiu_values()
+        if aiu_values:
+            self.admin_spinbox.setValue(aiu_values.get('administracion', 0))
+            self.imprev_spinbox.setValue(aiu_values.get('imprevistos', 0))
+            self.util_spinbox.setValue(aiu_values.get('utilidad', 0))
+            self.iva_spinbox.setValue(aiu_values.get('iva_sobre_utilidad', 0))
+
+    def save_aiu_values(self):
+        new_values = {
+            'administracion': self.admin_spinbox.value(),
+            'imprevistos': self.imprev_spinbox.value(),
+            'utilidad': self.util_spinbox.value(),
+            'iva_sobre_utilidad': self.iva_spinbox.value()
+        }
+        # El método update_aiu_values ya existe en el manager
+        success = self.controller.aiu_manager.update_aiu_values(**new_values)
+        if success:
+            QMessageBox.information(self, "Éxito", "Los valores AIU se han actualizado.")
+        else:
+            QMessageBox.warning(self, "Fallo", "No se pudieron actualizar los valores AIU.")
