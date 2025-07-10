@@ -1,37 +1,34 @@
 class AIUManager:
-    def __init__(self, administracion=7, imprevistos=3, utilidad=5, iva_sobre_utilidad=19):
-        # Inicializar valores con los predeterminados o los valores pasados como parámetros
-        self.administracion = administracion
-        self.imprevistos = imprevistos
-        self.utilidad = utilidad
-        self.iva_sobre_utilidad = iva_sobre_utilidad
+    def __init__(self, database_manager):
+        self.database_manager = database_manager
 
-    def calcular_aiu(self, subtotal):
-        """Aplica los porcentajes de AIU al subtotal."""
-        admin_value = subtotal * (self.administracion / 100)
-        imprevistos_value = subtotal * (self.imprevistos / 100)
-        utilidad_value = subtotal * (self.utilidad / 100)
-        iva_value = utilidad_value * (self.iva_sobre_utilidad / 100)
-
-        return admin_value, imprevistos_value, utilidad_value, iva_value
-
-    def modificar_aiu(self, administracion, imprevistos, utilidad, iva_sobre_utilidad):
-        """Permite modificar los valores de AIU"""
-        self.administracion = administracion
-        self.imprevistos = imprevistos
-        self.utilidad = utilidad
-        self.iva_sobre_utilidad = iva_sobre_utilidad
-
-    def obtener_aiu(self):
-        """Retorna los valores actuales de AIU."""
-        return {
-            'administracion': self.administracion,
-            'imprevistos': self.imprevistos,
-            'utilidad': self.utilidad,
-            'iva_sobre_utilidad': self.iva_sobre_utilidad
-        }
-        
-    # Método alternativo con nombre más consistente con el resto del código
     def get_aiu_values(self):
-        """Alias para obtener_aiu para mantener consistencia con el resto del código."""
-        return self.obtener_aiu()
+        """Obtiene los valores de AIU."""
+        try:
+            cursor = self.database_manager.connection.cursor()
+            cursor.execute("SELECT administracion, imprevistos, utilidad, iva_sobre_utilidad FROM aiu_values LIMIT 1")
+            row = cursor.fetchone()
+            if row:
+                return {
+                    'administracion': row[0],
+                    'imprevistos': row[1],
+                    'utilidad': row[2],
+                    'iva_sobre_utilidad': row[3]
+                }
+            return None
+        except Exception as e:
+            print(f"Error al obtener valores AIU: {str(e)}")
+            return None
+
+    def update_aiu_values(self, administracion, imprevistos, utilidad, iva_sobre_utilidad):
+        """Actualiza los valores de AIU."""
+        try:
+            cursor = self.database_manager.connection.cursor()
+            cursor.execute("UPDATE aiu_values SET administracion = ?, imprevistos = ?, utilidad = ?, iva_sobre_utilidad = ? WHERE id = 1",
+                           (administracion, imprevistos, utilidad, iva_sobre_utilidad))
+            self.database_manager.connection.commit()
+            return True
+        except Exception as e:
+            print(f"Error al actualizar valores AIU: {str(e)}")
+            return False
+

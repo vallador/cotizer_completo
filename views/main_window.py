@@ -1,15 +1,15 @@
 from PyQt5.QtWidgets import QMainWindow, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QLineEdit, QComboBox, QTableWidget, \
-    QTableWidgetItem, QMessageBox, QWidget, QDoubleSpinBox, QHeaderView, QTextEdit, QFileDialog, QSplitter, QScrollArea, QGridLayout
+    QTableWidgetItem, QMessageBox, QWidget, QDoubleSpinBox, QHeaderView, QTextEdit, QFileDialog, QSplitter, QScrollArea, QGridLayout, QApplication, QVBoxLayout, QHBoxLayout, QAbstractItemView
 from controllers.cotizacion_controller import CotizacionController
 from models.cliente import Cliente
 from views.data_management_window import DataManagementWindow
 from views.email_dialog import SendEmailDialog
 from views.word_dialog import WordConfigDialog
 from views.cotizacion_file_dialog import CotizacionFileDialog
-from PyQt5.QtCore import Qt, pyqtSlot
+from PyQt5.QtCore import Qt, pyqtSlot, QMimeData, QByteArray
 from controllers.excel_controller import ExcelController
 from controllers.word_controller import WordController
-from PyQt5.QtGui import QPalette, QColor
+from PyQt5.QtGui import QPalette, QColor, QDrag
 import os
 from datetime import datetime
 
@@ -22,15 +22,102 @@ class EditableTableWidgetItem(QTableWidgetItem):
 
         if not editable:
             self.setFlags(self.flags() & ~Qt.ItemIsEditable)
+class DraggableTableWidget(QTableWidget):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDragDropMode(self.DragDropMode.InternalMove)
+        self.setSelectionBehavior(self.SelectionBehavior.SelectRows)
+        self.setDropIndicatorShown(True)
+        self.setEditTriggers(self.EditTrigger.NoEditTriggers)
+        self.drag_row_data = None  # <- aquí guardamos los datos temporalmente
+
+    def startDrag(self, supportedActions):
+        try:
+            self.drag_row_index = self.currentRow()
+            print(f"[startDrag] Fila seleccionada: {self.drag_row_index}")
+
+            self.drag_row_data = []
+            for col in range(5):
+                item = self.item(self.drag_row_index, col)
+                if item is None:
+                    print(f"[startDrag] ❌ Item en col {col} es None")
+                    self.drag_row_data.append("")
+                else:
+                    print(f"[startDrag] ✅ Col {col}: '{item.text()}'")
+                    self.drag_row_data.append(item.text())
+
+            drag = QDrag(self)
+            mimeData = QMimeData()
+            mimeData.setData('application/x-qabstractitemmodeldatalist', QByteArray(str(self.drag_row_index).encode()))
+            drag.setMimeData(mimeData)
+            drag.exec(supportedActions)
+            print("[startDrag] Drag iniciado.")
+        except Exception as e:
+            print(f"[startDrag] ERROR: {e}")
+
+    def dropEvent(self, event):
+        print("[dropEvent] Entró a dropEvent")
+        if event.mimeData().hasFormat('application/x-qabstractitemmodeldatalist'):
+            source_row_index = int(event.mimeData().data('application/x-qabstractitemmodeldatalist').data().decode())
+            self.drag_row_index = source_row_index
+        else:
+            print("[dropEvent] ERROR: No se encontraron datos de la fila arrastrada en QMimeData.")
+            event.ignore()
+            return
+
+        drop_row = self.indexAt(event.pos()).row()
+        if drop_row == -1:
+            drop_row = self.rowCount()
+
+        if drop_row == self.drag_row_index:
+            print("[dropEvent] 🎯 Drop en misma fila, no se hace nada")
+            return
+
+        # Eliminar fila original
+        self.removeRow(self.drag_row_index)
+
+        # Ajustar drop_row si era después del eliminado
+        if drop_row > self.drag_row_index:
+            drop_row -= 1
+
+        # Insertar nueva fila
+        self.insertRow(drop_row)
+        for col in range(5):
+            self.setItem(drop_row, col, QTableWidgetItem(self.drag_row_data[col]))
+
+        # Reinsertar botón
+        btn = QPushButton("Eliminar")
+        btn.clicked.connect(lambda _, r=drop_row: self.parent().delete_activity(r))
+        self.setCellWidget(drop_row, 5, btn)
+
+        # Actualizar totales si aplica
+        if hasattr(self.parent(), "update_totals"):
+            self.parent().update_totals()
+
+        # Reset y aceptar
+        self.drag_row_index = None
+        self.drag_row_data = None
+        self.viewport().update()
+        event.accept()
+        print(f"[dropEvent] ✅ Drop completado en fila {drop_row}")
+
 
 class MainWindow(QMainWindow):
-    def __init__(self, controller=None):
+    def __init__(self, cotizacion_controller, excel_controller):
         super().__init__()
 
         # Inicializar controlador
-        self.controller = controller if controller else CotizacionController()
+        self.controller = cotizacion_controller if cotizacion_controller else CotizacionController()
         self.aiu_manager = self.controller.aiu_manager
 
+        # Guardar los controladores que recibimos desde main.py
+        self.cotizacion_controller = cotizacion_controller
+        self.excel_controller = excel_controller
+
+        # el cotizacion_controller para obtener el aiu_manager
+        self.aiu_manager = self.cotizacion_controller.aiu_manager
         # Configurar ventana
         self.setWindowTitle("Sistema de Cotizaciones")
         self.setGeometry(100, 100, 1200, 800)
@@ -164,7 +251,14 @@ class MainWindow(QMainWindow):
         activities_layout.addWidget(activities_title)
 
         # Tabla de actividades
-        self.activities_table = QTableWidget(0, 6)
+        self.activities_table = DraggableTableWidget(0, 6)
+        self.activities_table.setDragEnabled(True)
+        self.activities_table.setAcceptDrops(True)
+        self.activities_table.setDropIndicatorShown(True)
+        self.activities_table.setDragDropMode(QAbstractItemView.InternalMove)
+        self.activities_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.activities_table.setDefaultDropAction(Qt.MoveAction)
+
         self.activities_table.setHorizontalHeaderLabels(["Descripción", "Cantidad", "Unidad", "Valor Unitario", "Total", ""])
         self.activities_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.activities_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
@@ -409,6 +503,7 @@ class MainWindow(QMainWindow):
             # Cargar categorías
             self.refresh_category_combo()
 
+            self.load_chapters()
             # Cargar actividades
             self.refresh_activity_combo()
         except Exception as e:
@@ -797,7 +892,7 @@ class MainWindow(QMainWindow):
             self.chapter_combo.addItem("Seleccionar capítulo...", None)
 
             for chapter in chapters:
-                self.chapter_combo.addItem(chapter['nombre'], chapter['id'])  # Acceso como diccionario
+                self.chapter_combo.addItem(chapter['nombre'], chapter['id'])
 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error al cargar capítulos: {str(e)}")
@@ -822,10 +917,48 @@ class MainWindow(QMainWindow):
             # Obtener cantidad
             cantidad = self.pred_quantity_spinbox.value()
 
-            # Agregar a la tabla
-            self.add_activity_to_table(activity['descripcion'], cantidad, activity['unidad'], activity['valor_unitario'])
+            # Obtener información del capítulo si existe
+            chapter_id = activity.get('categoria_id')
+            chapter_name = None
+
+            if chapter_id:
+                chapter = self.controller.database_manager.get_chapter_by_id(chapter_id)
+                if chapter:
+                    chapter_name = chapter['nombre']
+
+            # Agregar a la tabla con información del capítulo
+            self.add_activity_to_table(
+                activity['descripcion'],
+                cantidad,
+                activity['unidad'],
+                activity['valor_unitario'],
+                chapter_id,
+                chapter_name
+            )
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error al agregar actividad: {str(e)}")
+
+    def get_chapter_color(self, chapter_id):
+        """Obtiene un color único para cada capítulo"""
+        colors = [
+            "#FFE6E6",  # Rosa claro
+            "#E6F3FF",  # Azul claro
+            "#E6FFE6",  # Verde claro
+            "#FFF0E6",  # Naranja claro
+            "#F0E6FF",  # Púrpura claro
+            "#FFFFE6",  # Amarillo claro
+            "#E6FFFF",  # Cian claro
+            "#FFE6F0",  # Magenta claro
+            "#F0FFE6",  # Lima claro
+            "#E6E6FF"  # Lavanda claro
+        ]
+
+        if chapter_id is None:
+            return "#FFFFFF"  # Blanco para actividades sin capítulo
+
+        # Usar el ID del capítulo para seleccionar un color de forma consistente
+        color_index = (chapter_id - 1) % len(colors)
+        return colors[color_index]
 
     def add_related_activity(self):
         """Agrega la actividad relacionada seleccionada a la tabla"""
@@ -847,8 +980,24 @@ class MainWindow(QMainWindow):
             # Obtener cantidad
             cantidad = self.pred_quantity_spinbox.value()
 
-            # Agregar a la tabla
-            self.add_activity_to_table(activity['descripcion'], cantidad, activity['unidad'], activity['valor_unitario'])
+            # Obtener información del capítulo si existe
+            chapter_id = activity.get('categoria_id')
+            chapter_name = None
+
+            if chapter_id:
+                chapter = self.controller.database_manager.get_chapter_by_id(chapter_id)
+                if chapter:
+                    chapter_name = chapter['nombre']
+
+            # Agregar a la tabla con información del capítulo
+            self.add_activity_to_table(
+                activity['descripcion'],
+                cantidad,
+                activity['unidad'],
+                activity['valor_unitario'],
+                chapter_id,
+                chapter_name
+            )
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error al agregar actividad relacionada: {str(e)}")
 
@@ -881,7 +1030,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error al agregar actividad manual: {str(e)}")
 
-    def add_activity_to_table(self, descripcion, cantidad, unidad, valor_unitario):
+    def add_activity_to_table(self, descripcion, cantidad, unidad, valor_unitario, chapter_id=None, chapter_name=None):
         """Agrega una actividad a la tabla"""
         try:
             # Calcular total
@@ -892,19 +1041,39 @@ class MainWindow(QMainWindow):
             self.activities_table.insertRow(row)
 
             # Descripción
-            self.activities_table.setItem(row, 0, EditableTableWidgetItem(descripcion))
+            desc_item = EditableTableWidgetItem(descripcion)
+            self.activities_table.setItem(row, 0, desc_item)
 
             # Cantidad
-            self.activities_table.setItem(row, 1, EditableTableWidgetItem(cantidad))
+            cant_item = EditableTableWidgetItem(cantidad)
+            self.activities_table.setItem(row, 1, cant_item)
 
             # Unidad
-            self.activities_table.setItem(row, 2, EditableTableWidgetItem(unidad))
+            unit_item = EditableTableWidgetItem(unidad)
+            self.activities_table.setItem(row, 2, unit_item)
 
             # Valor unitario
-            self.activities_table.setItem(row, 3, EditableTableWidgetItem(valor_unitario))
+            valor_item = EditableTableWidgetItem(valor_unitario)
+            self.activities_table.setItem(row, 3, valor_item)
 
             # Total
-            self.activities_table.setItem(row, 4, EditableTableWidgetItem(total, False))
+            total_item = EditableTableWidgetItem(total, False)
+            self.activities_table.setItem(row, 4, total_item)
+
+            # Aplicar color de fondo según el capítulo
+            if chapter_id:
+                color = self.get_chapter_color(chapter_id)
+                from PyQt5.QtGui import QColor
+                bg_color = QColor(color)
+
+                # Aplicar color a todas las celdas de la fila
+                for col in range(5):
+                    item = self.activities_table.item(row, col)
+                    if item:
+                        item.setBackground(bg_color)
+
+                # Guardar información del capítulo en la fila (para uso posterior)
+                desc_item.setData(Qt.UserRole, {'chapter_id': chapter_id, 'chapter_name': chapter_name})
 
             # Botón eliminar
             delete_btn = QPushButton("Eliminar")
@@ -1007,10 +1176,7 @@ class MainWindow(QMainWindow):
             aiu_values = self.aiu_manager.get_aiu_values()
 
             # Crear controlador de Excel
-            excel_controller = ExcelController(self.controller)
-
-            # Generar Excel
-            excel_path = excel_controller.generate_excel(
+            excel_path = self.excel_controller.generate_excel(
                 activities=activities,
                 tipo_persona=self.tipo_combo.currentText().lower(),
                 administracion=aiu_values['administracion'],
@@ -1026,6 +1192,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error al generar el Excel: {str(e)}")
             return None
+
 
     def generate_word(self):
         """Genera un documento Word con la cotización actual"""

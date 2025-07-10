@@ -1,446 +1,425 @@
 # utils/database_manager.py
-
-import sqlite3
 from typing import List, Dict
 
+import sqlite3
+
+
+
+
 class DatabaseManager:
-    def __init__(self, db_file: str):
-        self.db_file = db_file
-        self.conn = None
-        self.cursor = None
-
-
-    def connect(self):
-        # Conectar a la base de datos
-        self.conn = sqlite3.connect(self.db_file)
-        # Crear el cursor para ejecutar comandos SQL
-        self.cursor = self.conn.cursor()
-        # Crear tablas si no existen
+    def __init__(self, db_path="data/cotizaciones.db"): # Ruta corregida para ser más robusta
+        self.db_path = db_path
+        self.connection = None
+        self.connect()
         self.create_tables()
 
-    def disconnect(self):
-        # Cerrar el cursor si existe
-        if self.cursor:
-            self.cursor.close()
-        # Cerrar la conexión si existe
-        if self.conn:
-            self.conn.close()
+    def connect(self):
+        """Establece la conexión a la base de datos."""
+        try:
+            # Asegurarse de que el directorio de datos exista
+            import os
+            os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+            self.connection = sqlite3.connect(self.db_path)
+            print("Conexión a la base de datos establecida.")
+        except sqlite3.Error as e:
+            print(f"Error al conectar a la base de datos: {e}")
+
+    def close(self):
+        """Cierra la conexión a la base de datos."""
+        if self.connection:
+            self.connection.close()
+            print("Conexión a la base de datos cerrada.")
 
     def create_tables(self):
-        self.cursor.execute('''
-        CREATE TABLE IF NOT EXISTS clientes (
-            id INTEGER PRIMARY KEY,
-            nombre TEXT NOT NULL,
-            tipo TEXT NOT NULL,
-            direccion TEXT,
-            nit TEXT,
-            telefono TEXT,
-            email TEXT
-        )
-        ''')
-        
-        # Crear tabla de categorías
-        self.cursor.execute('''
-        CREATE TABLE IF NOT EXISTS categorias (
-            id INTEGER PRIMARY KEY,
-            nombre TEXT NOT NULL,
-            descripcion TEXT
-        )
-        ''')
-        
-        # Crear tabla de actividades con referencia a categoría
-        self.cursor.execute('''
-        CREATE TABLE IF NOT EXISTS actividades (
-            id INTEGER PRIMARY KEY,
-            descripcion TEXT NOT NULL,
-            unidad TEXT NOT NULL,
-            valor_unitario REAL NOT NULL,
-            categoria_id INTEGER,
-            FOREIGN KEY (categoria_id) REFERENCES categorias (id)
-        )
-        ''')
-        
-        # Crear tabla de productos
-        self.cursor.execute('''
-        CREATE TABLE IF NOT EXISTS productos (
-            id INTEGER PRIMARY KEY,
-            nombre TEXT NOT NULL,
-            descripcion TEXT,
-            unidad TEXT NOT NULL,
-            precio_unitario REAL NOT NULL,
-            categoria_id INTEGER,
-            FOREIGN KEY (categoria_id) REFERENCES categorias (id)
-        )
-        ''')
-        
-        # Crear tabla de relación entre actividades y productos
-        self.cursor.execute('''
-        CREATE TABLE IF NOT EXISTS actividad_producto (
-            id INTEGER PRIMARY KEY,
-            actividad_id INTEGER NOT NULL,
-            producto_id INTEGER NOT NULL,
-            cantidad REAL NOT NULL,
-            FOREIGN KEY (actividad_id) REFERENCES actividades (id),
-            FOREIGN KEY (producto_id) REFERENCES productos (id)
-        )
-        ''')
-        
-        # Crear tabla de relaciones entre actividades
-        self.cursor.execute('''
-        CREATE TABLE IF NOT EXISTS actividad_relacionada (
-            id INTEGER PRIMARY KEY,
-            actividad_principal_id INTEGER NOT NULL,
-            actividad_relacionada_id INTEGER NOT NULL,
-            FOREIGN KEY (actividad_principal_id) REFERENCES actividades (id),
-            FOREIGN KEY (actividad_relacionada_id) REFERENCES actividades (id)
-        )
-        ''')
-        
-        # Crear tabla de cotizaciones
-        self.cursor.execute('''
-        CREATE TABLE IF NOT EXISTS cotizaciones (
-            id INTEGER PRIMARY KEY,
-            numero TEXT NOT NULL,
-            fecha TEXT NOT NULL,
-            cliente_id INTEGER NOT NULL,
-            subtotal REAL NOT NULL,
-            iva REAL NOT NULL,
-            total REAL NOT NULL,
-            administracion REAL,
-            imprevistos REAL,
-            utilidad REAL,
-            iva_utilidad REAL,
-            FOREIGN KEY (cliente_id) REFERENCES clientes (id)
-        )
-        ''')
-        
-        # Crear tabla de detalles de cotización (actividades incluidas)
-        self.cursor.execute('''
-        CREATE TABLE IF NOT EXISTS cotizacion_detalles (
-            id INTEGER PRIMARY KEY,
-            cotizacion_id INTEGER NOT NULL,
-            actividad_id INTEGER NOT NULL,
-            cantidad REAL NOT NULL,
-            valor_unitario REAL NOT NULL,
-            total REAL NOT NULL,
-            FOREIGN KEY (cotizacion_id) REFERENCES cotizaciones (id),
-            FOREIGN KEY (actividad_id) REFERENCES actividades (id)
-        )
-        ''')
-        
-        self.conn.commit()
+        """Crea las tablas necesarias si no existen."""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS clientes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tipo TEXT NOT NULL,
+                    nombre TEXT NOT NULL,
+                    direccion TEXT,
+                    nit TEXT,
+                    telefono TEXT,
+                    email TEXT
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS categorias (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    nombre TEXT NOT NULL UNIQUE
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS actividades (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    descripcion TEXT NOT NULL,
+                    unidad TEXT NOT NULL,
+                    valor_unitario REAL NOT NULL,
+                    categoria_id INTEGER,
+                    FOREIGN KEY (categoria_id) REFERENCES categorias(id)
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS capitulos (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    nombre TEXT NOT NULL,
+                    descripcion TEXT,
+                    orden INTEGER DEFAULT 0
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS aiu_values (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    administracion REAL,
+                    imprevistos REAL,
+                    utilidad REAL,
+                    iva_sobre_utilidad REAL
+                )
+            """)
+            self.connection.commit()
+            print("Tablas verificadas/creadas correctamente.")
 
-    def add_client(self, client_data: Dict):
-        self.cursor.execute('''
-        INSERT INTO clientes (nombre, tipo, direccion, nit, telefono, email)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ''', (client_data['nombre'], client_data['tipo'], client_data['direccion'],
-              client_data.get('nit'), client_data.get('telefono'), client_data.get('email')))
-        self.conn.commit()
-        return self.cursor.lastrowid
+            # Insertar valores AIU por defecto si no existen
+            cursor.execute("SELECT COUNT(*) FROM aiu_values")
+            if cursor.fetchone()[0] == 0:
+                cursor.execute(
+                    "INSERT INTO aiu_values (administracion, imprevistos, utilidad, iva_sobre_utilidad) VALUES (?, ?, ?, ?)",
+                    (10.0, 5.0, 5.0, 19.0))
+                self.connection.commit()
+                print("Valores AIU por defecto insertados.")
 
-    def get_all_clients(self) -> List[Dict]:
-        self.cursor.execute('SELECT * FROM clientes')
-        columns = [column[0] for column in self.cursor.description]
-        return [dict(zip(columns, row)) for row in self.cursor.fetchall()]
-        
-    def get_all_activities(self) -> List[Dict]:
-        self.cursor.execute('''
-        SELECT a.*, c.nombre as categoria_nombre 
-        FROM actividades a
-        LEFT JOIN categorias c ON a.categoria_id = c.id
-        ''')
-        columns = [column[0] for column in self.cursor.description]
-        return [dict(zip(columns, row)) for row in self.cursor.fetchall()]
+        except sqlite3.Error as e:
+            print(f"Error al crear tablas: {e}")
 
-    def get_client_by_id(self, client_id: int) -> Dict:
-        self.cursor.execute('SELECT * FROM clientes WHERE id = ?', (client_id,))
-        columns = [column[0] for column in self.cursor.description]
-        row = self.cursor.fetchone()
-        return dict(zip(columns, row)) if row else None
+    # Métodos para clientes
+    def add_client(self, tipo, nombre, direccion, nit, telefono, email):
+        """Agrega un nuevo cliente a la base de datos."""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute(
+                "INSERT INTO clientes (tipo, nombre, direccion, nit, telefono, email) VALUES (?, ?, ?, ?, ?, ?)",
+                (tipo, nombre, direccion, nit, telefono, email))
+            self.connection.commit()
+            return cursor.lastrowid
+        except sqlite3.Error as e:
+            print(f"Error al agregar cliente: {e}")
+            return None
 
-    def update_client(self, client_id: int, client_data: Dict):
-        self.cursor.execute('''
-        UPDATE clientes
-        SET nombre = ?, tipo = ?, direccion = ?, nit = ?, telefono = ?, email = ?
-        WHERE id = ?
-        ''', (client_data['nombre'], client_data['tipo'], client_data['direccion'],
-              client_data.get('nit'), client_data.get('telefono'), client_data.get('email'),
-              client_id))
-        self.conn.commit()
+    def get_all_clients(self):
+        """Obtiene todos los clientes de la base de datos."""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("SELECT id, tipo, nombre, direccion, nit, telefono, email FROM clientes")
+            clients = []
+            for row in cursor.fetchall():
+                clients.append({
+                    'id': row[0],
+                    'tipo': row[1],
+                    'nombre': row[2],
+                    'direccion': row[3],
+                    'nit': row[4],
+                    'telefono': row[5],
+                    'email': row[6]
+                })
+            return clients
+        except sqlite3.Error as e:
+            print(f"Error al obtener clientes: {e}")
+            return []
 
-    def delete_client(self, client_id: int):
-        self.cursor.execute('DELETE FROM clientes WHERE id = ?', (client_id,))
-        self.conn.commit()
-        
-    # Métodos para actividades
-    def add_activity(self, activity_data: Dict):
-        self.cursor.execute('''
-        INSERT INTO actividades (descripcion, unidad, valor_unitario, categoria_id)
-        VALUES (?, ?, ?, ?)
-        ''', (activity_data['descripcion'], activity_data['unidad'], 
-              activity_data['valor_unitario'], activity_data.get('categoria_id')))
-        self.conn.commit()
-        return self.cursor.lastrowid
-        
-    def update_activity(self, activity_id: int, activity_data: Dict):
-        self.cursor.execute('''
-        UPDATE actividades
-        SET descripcion = ?, unidad = ?, valor_unitario = ?, categoria_id = ?
-        WHERE id = ?
-        ''', (activity_data['descripcion'], activity_data['unidad'], 
-              activity_data['valor_unitario'], activity_data.get('categoria_id'), activity_id))
-        self.conn.commit()
-        
-    def delete_activity(self, activity_id: int):
-        # Primero eliminar relaciones
-        self.cursor.execute('DELETE FROM actividad_producto WHERE actividad_id = ?', (activity_id,))
-        self.cursor.execute('DELETE FROM actividad_relacionada WHERE actividad_principal_id = ? OR actividad_relacionada_id = ?', 
-                           (activity_id, activity_id))
-        # Luego eliminar la actividad
-        self.cursor.execute('DELETE FROM actividades WHERE id = ?', (activity_id,))
-        self.conn.commit()
-        
-    def get_activity_by_id(self, activity_id: int) -> Dict:
-        self.cursor.execute('''
-        SELECT a.*, c.nombre as categoria_nombre 
-        FROM actividades a
-        LEFT JOIN categorias c ON a.categoria_id = c.id
-        WHERE a.id = ?
-        ''', (activity_id,))
-        columns = [column[0] for column in self.cursor.description]
-        row = self.cursor.fetchone()
-        return dict(zip(columns, row)) if row else None
-    
-    # Métodos para productos
-    def add_product(self, product_data: Dict):
-        self.cursor.execute('''
-        INSERT INTO productos (nombre, descripcion, unidad, precio_unitario, categoria_id)
-        VALUES (?, ?, ?, ?, ?)
-        ''', (product_data['nombre'], product_data.get('descripcion'), 
-              product_data['unidad'], product_data['precio_unitario'], 
-              product_data.get('categoria_id')))
-        self.conn.commit()
-        return self.cursor.lastrowid
-        
-    def update_product(self, product_id: int, product_data: Dict):
-        self.cursor.execute('''
-        UPDATE productos
-        SET nombre = ?, descripcion = ?, unidad = ?, precio_unitario = ?, categoria_id = ?
-        WHERE id = ?
-        ''', (product_data['nombre'], product_data.get('descripcion'), 
-              product_data['unidad'], product_data['precio_unitario'], 
-              product_data.get('categoria_id'), product_id))
-        self.conn.commit()
-        
-    def delete_product(self, product_id: int):
-        # Primero eliminar relaciones
-        self.cursor.execute('DELETE FROM actividad_producto WHERE producto_id = ?', (product_id,))
-        # Luego eliminar el producto
-        self.cursor.execute('DELETE FROM productos WHERE id = ?', (product_id,))
-        self.conn.commit()
-        
-    def get_product_by_id(self, product_id: int) -> Dict:
-        self.cursor.execute('''
-        SELECT p.*, c.nombre as categoria_nombre 
-        FROM productos p
-        LEFT JOIN categorias c ON p.categoria_id = c.id
-        WHERE p.id = ?
-        ''', (product_id,))
-        columns = [column[0] for column in self.cursor.description]
-        row = self.cursor.fetchone()
-        return dict(zip(columns, row)) if row else None
-        
-    def get_all_products(self) -> List[Dict]:
-        self.cursor.execute('''
-        SELECT p.*, c.nombre as categoria_nombre 
-        FROM productos p
-        LEFT JOIN categorias c ON p.categoria_id = c.id
-        ''')
-        columns = [column[0] for column in self.cursor.description]
-        return [dict(zip(columns, row)) for row in self.cursor.fetchall()]
-    
+    def get_client_by_id(self, client_id):
+        """Obtiene un cliente por su ID."""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("SELECT id, tipo, nombre, direccion, nit, telefono, email FROM clientes WHERE id = ?",
+                           (client_id,))
+            row = cursor.fetchone()
+            if row:
+                return {
+                    'id': row[0],
+                    'tipo': row[1],
+                    'nombre': row[2],
+                    'direccion': row[3],
+                    'nit': row[4],
+                    'telefono': row[5],
+                    'email': row[6]
+                }
+            return None
+        except sqlite3.Error as e:
+            print(f"Error al obtener cliente por ID: {e}")
+            return None
+
+    def update_client(self, client_id, client_data):
+        """Actualiza los datos de un cliente existente."""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("""
+                UPDATE clientes
+                SET tipo = ?, nombre = ?, direccion = ?, nit = ?, telefono = ?, email = ?
+                WHERE id = ?
+            """, (client_data['tipo'], client_data['nombre'], client_data['direccion'],
+                  client_data['nit'], client_data['telefono'], client_data['email'], client_id))
+            self.connection.commit()
+            return True
+        except sqlite3.Error as e:
+            print(f"Error al actualizar cliente: {e}")
+            return False
+    def get_related_activities(self, activity_id):
+        """Obtiene las actividades relacionadas con una actividad por su ID."""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("""
+                        SELECT
+                            a.id, a.descripcion, a.unidad, a.valor_unitario, a.categoria_id, c.nombre as categoria_nombre
+                        FROM
+                            actividades a
+                        LEFT JOIN
+                            categorias c ON a.categoria_id = c.id
+                        WHERE
+                            a.id IN (
+                                SELECT actividad_relacionada_id 
+                                FROM actividad_relacionada 
+                                WHERE actividad_principal_id = ?
+                            )
+                    """, (activity_id,))
+            activities = []
+            for row in cursor.fetchall():
+                activities.append({
+                    'id': row[0],
+                    'descripcion': row[1],
+                    'unidad': row[2],
+                    'valor_unitario': row[3],
+                    'categoria_id': row[4],
+                    'categoria_nombre': row[5]
+                })
+            return activities
+        except Exception as e:
+            print(f"Error al obtener actividades relacionadas: {str(e)}")
+            return []
+
+
+    def delete_client(self, client_id):
+        """Elimina un cliente de la base de datos."""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("DELETE FROM clientes WHERE id = ?", (client_id,))
+            self.connection.commit()
+            return True
+        except sqlite3.Error as e:
+            print(f"Error al eliminar cliente: {e}")
+            return False
+
     # Métodos para categorías
-    def add_category(self, category_data: Dict):
-        self.cursor.execute('''
-        INSERT INTO categorias (nombre, descripcion)
-        VALUES (?, ?)
-        ''', (category_data['nombre'], category_data.get('descripcion')))
-        self.conn.commit()
-        return self.cursor.lastrowid
-        
-    def update_category(self, category_id: int, category_data: Dict):
-        self.cursor.execute('''
-        UPDATE categorias
-        SET nombre = ?, descripcion = ?
-        WHERE id = ?
-        ''', (category_data['nombre'], category_data.get('descripcion'), category_id))
-        self.conn.commit()
-        
-    def delete_category(self, category_id: int):
-        self.cursor.execute('DELETE FROM categorias WHERE id = ?', (category_id,))
-        self.conn.commit()
-        
-    def get_category_by_id(self, category_id: int) -> Dict:
-        self.cursor.execute('SELECT * FROM categorias WHERE id = ?', (category_id,))
-        columns = [column[0] for column in self.cursor.description]
-        row = self.cursor.fetchone()
-        return dict(zip(columns, row)) if row else None
-        
-    def get_all_categories(self) -> List[Dict]:
-        self.cursor.execute('SELECT * FROM categorias')
-        columns = [column[0] for column in self.cursor.description]
-        return [dict(zip(columns, row)) for row in self.cursor.fetchall()]
-    
-    # Métodos para relaciones entre actividades y productos
-    def add_activity_product(self, activity_id: int, product_id: int, cantidad: float):
-        self.cursor.execute('''
-        INSERT INTO actividad_producto (actividad_id, producto_id, cantidad)
-        VALUES (?, ?, ?)
-        ''', (activity_id, product_id, cantidad))
-        self.conn.commit()
-        return self.cursor.lastrowid
-        
-    def update_activity_product(self, relation_id: int, cantidad: float):
-        self.cursor.execute('''
-        UPDATE actividad_producto
-        SET cantidad = ?
-        WHERE id = ?
-        ''', (cantidad, relation_id))
-        self.conn.commit()
-        
-    def delete_activity_product(self, relation_id: int):
-        self.cursor.execute('DELETE FROM actividad_producto WHERE id = ?', (relation_id,))
-        self.conn.commit()
-        
-    def get_products_by_activity(self, activity_id: int) -> List[Dict]:
-        self.cursor.execute('''
-        SELECT p.*, ap.cantidad, ap.id as relation_id
-        FROM productos p
-        JOIN actividad_producto ap ON p.id = ap.producto_id
-        WHERE ap.actividad_id = ?
-        ''', (activity_id,))
-        columns = [column[0] for column in self.cursor.description]
-        return [dict(zip(columns, row)) for row in self.cursor.fetchall()]
-    
-    # Métodos para relaciones entre actividades
-    def add_related_activity(self, main_activity_id: int, related_activity_id: int):
-        self.cursor.execute('''
-        INSERT INTO actividad_relacionada (actividad_principal_id, actividad_relacionada_id)
-        VALUES (?, ?)
-        ''', (main_activity_id, related_activity_id))
-        self.conn.commit()
-        return self.cursor.lastrowid
-        
-    def delete_related_activity(self, relation_id: int):
-        self.cursor.execute('DELETE FROM actividad_relacionada WHERE id = ?', (relation_id,))
-        self.conn.commit()
-        
-    def get_related_activities(self, activity_id: int) -> List[Dict]:
-        self.cursor.execute('''
-        SELECT a.*, ar.id as relation_id
-        FROM actividades a
-        JOIN actividad_relacionada ar ON a.id = ar.actividad_relacionada_id
-        WHERE ar.actividad_principal_id = ?
-        ''', (activity_id,))
-        columns = [column[0] for column in self.cursor.description]
-        return [dict(zip(columns, row)) for row in self.cursor.fetchall()]
-    
-    # Métodos para búsqueda y filtrado
-    def search_activities_by_text(self, search_text: str) -> List[Dict]:
-        search_pattern = f"%{search_text}%"
-        self.cursor.execute('''
-        SELECT a.*, c.nombre as categoria_nombre 
-        FROM actividades a
-        LEFT JOIN categorias c ON a.categoria_id = c.id
-        WHERE a.descripcion LIKE ?
-        ''', (search_pattern,))
-        columns = [column[0] for column in self.cursor.description]
-        return [dict(zip(columns, row)) for row in self.cursor.fetchall()]
-        
-    def search_products_by_text(self, search_text: str) -> List[Dict]:
-        search_pattern = f"%{search_text}%"
-        self.cursor.execute('''
-        SELECT p.*, c.nombre as categoria_nombre 
-        FROM productos p
-        LEFT JOIN categorias c ON p.categoria_id = c.id
-        WHERE p.nombre LIKE ? OR p.descripcion LIKE ?
-        ''', (search_pattern, search_pattern))
-        columns = [column[0] for column in self.cursor.description]
-        return [dict(zip(columns, row)) for row in self.cursor.fetchall()]
-        
-    def get_activities_by_category(self, category_id: int) -> List[Dict]:
-        self.cursor.execute('''
-        SELECT a.*, c.nombre as categoria_nombre 
-        FROM actividades a
-        LEFT JOIN categorias c ON a.categoria_id = c.id
-        WHERE a.categoria_id = ?
-        ''', (category_id,))
-        columns = [column[0] for column in self.cursor.description]
-        return [dict(zip(columns, row)) for row in self.cursor.fetchall()]
-        
-    # Métodos para cotizaciones
-    def add_quotation(self, quotation_data: Dict, activities: List[Dict]):
-        # Insertar la cotización
-        self.cursor.execute('''
-        INSERT INTO cotizaciones (numero, fecha, cliente_id, subtotal, iva, total, 
-                                 administracion, imprevistos, utilidad, iva_utilidad)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (quotation_data['numero'], quotation_data['fecha'], quotation_data['cliente_id'],
-              quotation_data['subtotal'], quotation_data['iva'], quotation_data['total'],
-              quotation_data.get('administracion'), quotation_data.get('imprevistos'),
-              quotation_data.get('utilidad'), quotation_data.get('iva_utilidad')))
-        
-        quotation_id = self.cursor.lastrowid
-        
-        # Insertar los detalles de la cotización (actividades)
-        for activity in activities:
-            self.cursor.execute('''
-            INSERT INTO cotizacion_detalles (cotizacion_id, actividad_id, cantidad, valor_unitario, total)
-            VALUES (?, ?, ?, ?, ?)
-            ''', (quotation_id, activity['actividad_id'], activity['cantidad'],
-                  activity['valor_unitario'], activity['total']))
-        
-        self.conn.commit()
-        return quotation_id
-        
-    def get_all_quotations(self) -> List[Dict]:
-        self.cursor.execute('''
-        SELECT c.*, cl.nombre as cliente_nombre 
-        FROM cotizaciones c
-        JOIN clientes cl ON c.cliente_id = cl.id
-        ''')
-        columns = [column[0] for column in self.cursor.description]
-        return [dict(zip(columns, row)) for row in self.cursor.fetchall()]
-        
-    def get_quotation_by_id(self, quotation_id: int) -> Dict:
-        self.cursor.execute('''
-        SELECT c.*, cl.nombre as cliente_nombre 
-        FROM cotizaciones c
-        JOIN clientes cl ON c.cliente_id = cl.id
-        WHERE c.id = ?
-        ''', (quotation_id,))
-        columns = [column[0] for column in self.cursor.description]
-        row = self.cursor.fetchone()
-        quotation = dict(zip(columns, row)) if row else None
-        
-        if quotation:
-            # Obtener los detalles de la cotización
-            self.cursor.execute('''
-            SELECT cd.*, a.descripcion, a.unidad
-            FROM cotizacion_detalles cd
-            JOIN actividades a ON cd.actividad_id = a.id
-            WHERE cd.cotizacion_id = ?
-            ''', (quotation_id,))
-            columns = [column[0] for column in self.cursor.description]
-            details = [dict(zip(columns, row)) for row in self.cursor.fetchall()]
-            quotation['detalles'] = details
-            
-        return quotation
-        
-    def delete_quotation(self, quotation_id: int):
-        # Eliminar primero los detalles
-        self.cursor.execute('DELETE FROM cotizacion_detalles WHERE cotizacion_id = ?', (quotation_id,))
-        # Luego eliminar la cotización
-        self.cursor.execute('DELETE FROM cotizaciones WHERE id = ?', (quotation_id,))
-        self.conn.commit()
+    def add_category(self, nombre):
+        """Agrega una nueva categoría."""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("INSERT INTO categorias (nombre) VALUES (?) ", (nombre,))
+            self.connection.commit()
+            return cursor.lastrowid
+        except sqlite3.Error as e:
+            print(f"Error al agregar categoría: {e}")
+            return None
+
+    def get_all_categories(self):
+        """Obtiene todas las categorías."""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("SELECT id, nombre FROM categorias")
+            categories = []
+            for row in cursor.fetchall():
+                categories.append({
+                    'id': row[0],
+                    'nombre': row[1]
+                })
+            return categories
+        except sqlite3.Error as e:
+            print(f"Error al obtener categorías: {e}")
+            return []
+
+    def update_category(self, category_id, new_name):
+        """Actualiza el nombre de una categoría."""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("UPDATE categorias SET nombre = ? WHERE id = ?", (new_name, category_id))
+            self.connection.commit()
+            return True
+        except sqlite3.Error as e:
+            print(f"Error al actualizar categoría: {e}")
+            return False
+
+    def delete_category(self, category_id):
+        """Elimina una categoría."""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("DELETE FROM categorias WHERE id = ?", (category_id,))
+            self.connection.commit()
+            return True
+        except sqlite3.Error as e:
+            print(f"Error al eliminar categoría: {e}")
+            return False
+
+    # Métodos para actividades
+    def add_activity(self, descripcion, unidad, valor_unitario, categoria_id=None):
+        """Agrega una nueva actividad."""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute(
+                "INSERT INTO actividades (descripcion, unidad, valor_unitario, categoria_id) VALUES (?, ?, ?, ?)",
+                (descripcion, unidad, valor_unitario, categoria_id))
+            self.connection.commit()
+            return cursor.lastrowid
+        except sqlite3.Error as e:
+            print(f"Error al agregar actividad: {e}")
+            return None
+
+    def get_all_activities(self):
+        """Obtiene todas las actividades con su categoría."""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("""
+                SELECT
+                    a.id, a.descripcion, a.unidad, a.valor_unitario, a.categoria_id, c.nombre as categoria_nombre
+                FROM
+                    actividades a
+                LEFT JOIN
+                    categorias c ON a.categoria_id = c.id
+            """)
+            activities = []
+            for row in cursor.fetchall():
+                activities.append({
+                    'id': row[0],
+                    'descripcion': row[1],
+                    'unidad': row[2],
+                    'valor_unitario': row[3],
+                    'categoria_id': row[4],
+                    'categoria_nombre': row[5]
+                })
+            return activities
+        except sqlite3.Error as e:
+            print(f"Error al obtener actividades: {e}")
+            return []
+
+    def get_activity_by_id(self, activity_id):
+        """Obtiene una actividad por su ID con su categoría."""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("""
+                SELECT
+                    a.id, a.descripcion, a.unidad, a.valor_unitario, a.categoria_id, c.nombre as categoria_nombre
+                FROM
+                    actividades a
+                LEFT JOIN
+                    categorias c ON a.categoria_id = c.id
+                WHERE
+                    a.id = ?
+            """, (activity_id,))
+            row = cursor.fetchone()
+            if row:
+                return {
+                    'id': row[0],
+                    'descripcion': row[1],
+                    'unidad': row[2],
+                    'valor_unitario': row[3],
+                    'categoria_id': row[4],
+                    'categoria_nombre': row[5]
+                }
+            return None
+        except sqlite3.Error as e:
+            print(f"Error al obtener actividad por ID: {e}")
+            return None
+
+    def update_activity(self, activity_id, descripcion, unidad, valor_unitario, categoria_id=None):
+        """Actualiza una actividad existente."""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("""
+                UPDATE actividades
+                SET descripcion = ?, unidad = ?, valor_unitario = ?, categoria_id = ?
+                WHERE id = ?
+            """, (descripcion, unidad, valor_unitario, categoria_id, activity_id))
+            self.connection.commit()
+            return True
+        except sqlite3.Error as e:
+            print(f"Error al actualizar actividad: {e}")
+            return False
+
+    def delete_activity(self, activity_id):
+        """Elimina una actividad."""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("DELETE FROM actividades WHERE id = ?", (activity_id,))
+            self.connection.commit()
+            return True
+        except sqlite3.Error as e:
+            print(f"Error al eliminar actividad: {e}")
+            return False
+
+    # Métodos para AIU
+    def get_aiu_values(self):
+        """Obtiene los valores de AIU."""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("SELECT administracion, imprevistos, utilidad, iva_sobre_utilidad FROM aiu_values LIMIT 1")
+            row = cursor.fetchone()
+            if row:
+                return {
+                    'administracion': row[0],
+                    'imprevistos': row[1],
+                    'utilidad': row[2],
+                    'iva_sobre_utilidad': row[3]
+                }
+            return None
+        except sqlite3.Error as e:
+            print(f"Error al obtener valores AIU: {e}")
+            return None
+
+    def update_aiu_values(self, administracion, imprevistos, utilidad, iva_sobre_utilidad):
+        """Actualiza los valores de AIU."""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute(
+                "UPDATE aiu_values SET administracion = ?, imprevistos = ?, utilidad = ?, iva_sobre_utilidad = ? WHERE id = 1",
+                (administracion, imprevistos, utilidad, iva_sobre_utilidad))
+            self.connection.commit()
+            return True
+        except sqlite3.Error as e:
+            print(f"Error al actualizar valores AIU: {e}")
+            return False
+
+    # Métodos para capítulos (agregados recientemente)
+    def get_all_chapters(self):
+        """Obtiene todos los capítulos de la base de datos."""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("SELECT id, nombre FROM capitulos ORDER BY orden ASC")
+            chapters = []
+            for row in cursor.fetchall():
+                chapters.append({
+                    'id': row[0],
+                    'nombre': row[1]
+                })
+            return chapters
+        except Exception as e:
+            print(f"Error al obtener todos los capítulos: {str(e)}")
+            return []
+
+    def get_chapter_by_id(self, chapter_id):
+        """Obtiene un capítulo por su ID."""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("SELECT id, nombre, descripcion, orden FROM capitulos WHERE id = ?", (chapter_id,))
+            row = cursor.fetchone()
+
+            if row:
+                return {
+                    'id': row[0],
+                    'nombre': row[1],
+                    'descripcion': row[2],
+                    'orden': row[3]
+                }
+            return None
+        except Exception as e:
+            print(f"Error al obtener capítulo por ID: {str(e)}")
+            return None
