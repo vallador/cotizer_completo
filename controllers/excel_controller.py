@@ -1,193 +1,268 @@
-# controllers/excel_controller.py
+# En controllers/excel_controller.py
+
 import openpyxl
-from openpyxl.utils import get_column_letter
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side, numbers
-import os
+from openpyxl.utils import get_column_letter
 from datetime import datetime
+import os
 
 
 class ExcelController:
-    """
-    Controlador responsable de generar los archivos de cotización en formato Excel.
-    """
-
     def __init__(self, cotizacion_controller, aiu_manager):
-        """
-        Inicializa el controlador de Excel.
-
-        Args:
-            cotizacion_controller: Instancia del controlador principal.
-            aiu_manager: Instancia del gestor de valores AIU.
-        """
         self.cotizacion_controller = cotizacion_controller
         self.aiu_manager = aiu_manager
 
-    def generate_excel(self, activities, tipo_persona, administracion, imprevistos, utilidad, iva_utilidad):
+    def aplicar_bordes_totales(self, sheet, start_row, end_row, color_hex):
+        """Aplica bordes exteriores gruesos y bordes interiores delgados a un bloque de celdas."""
+        thin = Side(border_style="thin", color="000000")
+        medium = Side(border_style="medium", color="000000")
+
+        fill = PatternFill(start_color=color_hex, end_color=color_hex, fill_type="solid")
+
+        for row in range(start_row, end_row + 1):
+            for col in range(1, 7):  # Columnas A (1) a F (6)
+                cell = sheet.cell(row=row, column=col)
+                cell.fill = fill
+
+                # Determinar bordes según posición
+                left = medium if col == 1 else thin
+                right = medium if col == 6 else thin
+                top = medium if row == start_row else thin
+                bottom = medium if row == end_row else thin
+
+                cell.border = Border(left=left, right=right, top=top, bottom=bottom)
+
+    def aplicar_bordes_totales_con_marco_grueso(self, sheet, start_row, end_row, start_col=1, end_col=6,
+                                                color_hex="D9EAD3"):
         """
-        Genera un archivo Excel de cotización con capítulos organizados y coloreados.
-        Este es ahora un MÉTODO de la clase.
+        Aplica bordes delgados internos y un marco grueso alrededor de un bloque rectangular.
+        - start_row, end_row: filas del bloque.
+        - start_col, end_col: columnas del bloque (por defecto A:F → 1:6).
         """
-        # Crear un nuevo archivo Excel
+        thin = Side(border_style="thin", color="000000")
+        medium = Side(border_style="medium", color="000000")
+        fill = PatternFill(start_color=color_hex, end_color=color_hex, fill_type="solid")
+
+        for row in range(start_row, end_row + 1):
+            for col in range(start_col, end_col + 1):
+                cell = sheet.cell(row=row, column=col)
+                cell.fill = fill
+
+                # Determinar bordes por posición (marco grueso)
+                left = medium if col == start_col else thin
+                right = medium if col == end_col else thin
+                top = medium if row == start_row else thin
+                bottom = medium if row == end_row else thin
+
+                cell.border = Border(left=left, right=right, top=top, bottom=bottom)
+    def generate_excel(self,activities, items, tipo_persona, administracion, imprevistos, utilidad, iva_utilidad):
+        """
+        Genera un archivo Excel de cotización profesional, manejando capítulos,
+        formato de celdas y lógica de AIU/IVA.
+        """
+        # 1. --- CONFIGURACIÓN INICIAL DEL LIBRO Y LA HOJA ---
         workbook = openpyxl.Workbook()
         sheet = workbook.active
         sheet.title = "Cotización"
 
-        # --- Estilos (sin cambios) ---
-        fill_color = PatternFill(start_color='008000', end_color='008000', fill_type='solid')
-        thick_border = Side(border_style="thick", color="000000")
-        thin_border = Side(border_style="thin", color="000000")
+        # 2. --- DEFINICIÓN DE ESTILOS REUTILIZABLES ---
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="008080", end_color="008080", fill_type="solid")
         chapter_font = Font(bold=True, color="FFFFFF")
-        chapter_fill = PatternFill(start_color='008000', end_color='008000', fill_type='solid')
-        chapter_alignment = Alignment(horizontal="center", vertical="center")
-        chapter_activity_colors = {
-            1: "C8E6C9", 2: "BBDEFB", 3: "DCEDC8", 4: "FFE0B2", 5: "E1BEE7",
-            6: "FFF9C4", 7: "B2EBF2", 8: "F8BBD9", 9: "F0F4C3", 10: "D1C4E9"
-        }
+        chapter_fill = PatternFill(start_color="004D40", end_color="004D40", fill_type="solid")
+        total_font = Font(bold=True)
 
-        # --- Anchos de columna (sin cambios) ---
+        ### SOLUCIÓN AL PROBLEMA 2 y 3: DEFINIR ALINEACIONES ###
+        # Alineación para la descripción: centrada verticalmente y con ajuste de texto
+        description_alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+        # Alineación para el resto de columnas: centrada en ambas direcciones
+        center_alignment = Alignment(horizontal="center", vertical="center")
+
+        # 3. --- CONFIGURACIÓN DE LA HOJA (ANCHOS Y ENCABEZADOS) ---
         sheet.column_dimensions['A'].width = 5
-        sheet.column_dimensions['B'].width = 50
-        sheet.column_dimensions['C'].width = 10
-        sheet.column_dimensions['D'].width = 10
-        sheet.column_dimensions['E'].width = 15
-        sheet.column_dimensions['F'].width = 15
+        sheet.column_dimensions['B'].width = 60
+        sheet.column_dimensions['C'].width = 12
+        sheet.column_dimensions['D'].width = 15
+        sheet.column_dimensions['E'].width = 20
+        sheet.column_dimensions['F'].width = 20
 
-        # --- Encabezados (sin cambios) ---
         headers = ["Item", "Descripción", "Cantidad", "Unidad", "Precio Unitario", "Total"]
-        for col_num, header in enumerate(headers, start=1):
-            col_letter = get_column_letter(col_num)
-            cell = sheet[f"{col_letter}1"]
-            cell.value = header
-            cell.font = Font(bold=True, color="FFFFFF")  # Letra blanca
-            cell.alignment = Alignment(horizontal="center")
-            cell.fill = fill_color  # Fondo verde
+        for col_num, header_title in enumerate(headers, 1):
+            cell = sheet.cell(row=1, column=col_num)
+            cell.value = header_title
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = center_alignment
 
-        # --- Organizar actividades por capítulos (sin cambios) ---
-        capitulos = {}
-        actividades_sin_capitulo = []
-        for activity in activities:
-            chapter_id = activity.get('chapter_id')
-            chapter_name = activity.get('chapter_name')
-            if chapter_id and chapter_name:
-                if chapter_id not in capitulos:
-                    capitulos[chapter_id] = {'nombre': chapter_name, 'actividades': []}
-                capitulos[chapter_id]['actividades'].append(activity)
-            else:
-                actividades_sin_capitulo.append(activity)
-
-        # --- Insertar actividades en las filas (sin cambios) ---
+        # 4. --- PROCESAMIENTO DE LOS ÍTEMS (CAPÍTULOS Y ACTIVIDADES) ---
         row_num = 2
-        item_num = 1
+        item_counter = 1
 
-        # Función auxiliar para insertar filas y aplicar formato
-        def _insert_activity_row(activity, fill=None):
-            nonlocal row_num, item_num
-            sheet[f"A{row_num}"].value = item_num
-            sheet[f"B{row_num}"].value = activity['descripcion']
-            sheet[f"C{row_num}"].value = activity['cantidad']
-            sheet[f"D{row_num}"].value = activity['unidad']
-            sheet[f"E{row_num}"].value = activity['valor_unitario']
-            sheet[f"F{row_num}"].value = f"=C{row_num}*E{row_num}"
+        for item in items:
+            if item['type'] == 'chapter':
+                sheet.merge_cells(start_row=row_num, start_column=1, end_row=row_num, end_column=6)
+                cell = sheet.cell(row=row_num, column=1)
+                cell.value = item['name'].upper()
+                cell.font = chapter_font
+                cell.fill = chapter_fill
+                cell.alignment = center_alignment
+                row_num += 1
 
-            for col in range(1, 7):
-                cell = sheet.cell(row=row_num, column=col)
-                if fill:
-                    cell.fill = fill
-                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
-            sheet[f"B{row_num}"].alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
-            sheet[f"E{row_num}"].number_format = '"$"#,##0.00'
-            sheet[f"F{row_num}"].number_format = '"$"#,##0.00'
-            row_num += 1
-            item_num += 1
+            # Reemplaza tu bloque 'elif item['type'] == 'activity':' con este:
 
-        # Insertar actividades sin capítulo
-        for activity in actividades_sin_capitulo:
-            _insert_activity_row(activity)
+            elif item['type'] == 'activity':
 
-        # Insertar actividades por capítulos
-        for chapter_id, capitulo_data in sorted(capitulos.items()):
-            sheet.merge_cells(f"A{row_num}:F{row_num}")
-            cell = sheet[f"A{row_num}"]
-            cell.value = capitulo_data['nombre'].upper()
-            cell.font = chapter_font
-            cell.alignment = chapter_alignment
-            cell.fill = chapter_fill
-            row_num += 1
+                # --- LÓGICA PARA INSERTAR FILA DE ACTIVIDAD (VERSIÓN ROBUSTA) ---
 
-            activity_fill = PatternFill(start_color=chapter_activity_colors.get(chapter_id, "FFFFFF"),
-                                        fill_type='solid')
-            for activity in capitulo_data['actividades']:
-                _insert_activity_row(activity, fill=activity_fill)
+                # 1. Asignar valores a las celdas. Para las celdas numéricas,
 
-        # --- Calcular totales (sin cambios, pero con formato mejorado) ---
-        total_row = row_num
-        subtotal_cell = f"F{total_row}"
-        sheet.merge_cells(f"A{total_row}:E{total_row}")
-        sheet[f"A{total_row}"].value = "TOTAL COSTOS DIRECTOS DE OBRA"
-        sheet[f"A{total_row}"].font = Font(bold=True)
-        sheet[f"A{total_row}"].alignment = Alignment(horizontal="right")
-        sheet[subtotal_cell].value = f"=SUM(F2:F{total_row - 1})"
-        sheet[subtotal_cell].number_format = '"$"#,##0.00'
-        sheet[subtotal_cell].font = Font(bold=True)
+                #    asegurarse de que el tipo de dato sea float/int, no string.
+
+                total_actividad = float(item['cantidad']) * float(item['valor_unitario'])
+
+                sheet.cell(row=row_num, column=1).value = item_counter
+
+                sheet.cell(row=row_num, column=2).value = item['descripcion']
+
+                sheet.cell(row=row_num, column=3).value = float(item['cantidad'])
+
+                sheet.cell(row=row_num, column=4).value = item['unidad']
+
+                sheet.cell(row=row_num, column=5).value = float(item['valor_unitario'])
+
+                sheet.cell(row=row_num, column=6).value = total_actividad
+
+                # 2. Aplicar alineaciones a todas las celdas de la fila.
+
+                #    Esto es seguro y no causa errores de tipo.
+
+                sheet.cell(row=row_num, column=1).alignment = center_alignment
+
+                sheet.cell(row=row_num, column=2).alignment = description_alignment
+
+                sheet.cell(row=row_num, column=3).alignment = center_alignment
+
+                sheet.cell(row=row_num, column=4).alignment = center_alignment
+
+                sheet.cell(row=row_num, column=5).alignment = center_alignment
+
+                sheet.cell(row=row_num, column=6).alignment = center_alignment
+
+                sheet.cell(row=row_num, column=5).number_format = '"$"#,##0.00'
+
+                sheet.cell(row=row_num, column=6).number_format = '"$"#,##0.00'
+
+                # 3. Incrementar contadores para la siguiente fila.
+
+                item_counter += 1
+
+                row_num += 1
+
+        # 5. --- CÁLCULO DE SUBTOTAL, TOTALES Y AIU ---
+        subtotal_row_num = row_num
+        subtotal_cell_address = f"F{subtotal_row_num}"
+
+        # Fila de Subtotal
+        sheet.merge_cells(f"A{subtotal_row_num}:E{subtotal_row_num}")
+        sheet[f"A{subtotal_row_num}"].value = "SUBTOTAL COSTOS DIRECTOS"
+        sheet[f"A{subtotal_row_num}"].font = total_font
+        sheet[f"A{subtotal_row_num}"].alignment = Alignment(horizontal="right")
+        sheet[subtotal_cell_address].value = f"=SUM(F2:F{subtotal_row_num - 1})"
+        sheet[subtotal_cell_address].number_format = '"$"#,##0.00'
+        sheet[subtotal_cell_address].font = total_font
         row_num += 1
 
-        if tipo_persona == "jurídica":
-            sheet.merge_cells(f"A{row_num}:E{row_num}");
-            sheet[f"A{row_num}"].value = f"ADMINISTRACIÓN ({administracion}%)";
-            sheet[f"F{row_num}"].value = f"={subtotal_cell}*{administracion / 100}";
-            sheet[f"F{row_num}"].number_format = '"$"#,##0.00';
-            sheet[f"A{row_num}"].alignment = Alignment(horizontal="right");
-            row_num += 1
-            sheet.merge_cells(f"A{row_num}:E{row_num}");
-            sheet[f"A{row_num}"].value = f"IMPREVISTOS ({imprevistos}%)";
-            sheet[f"F{row_num}"].value = f"={subtotal_cell}*{imprevistos / 100}";
-            sheet[f"F{row_num}"].number_format = '"$"#,##0.00';
-            sheet[f"A{row_num}"].alignment = Alignment(horizontal="right");
-            row_num += 1
-            util_cell = f"F{row_num}";
-            sheet.merge_cells(f"A{row_num}:E{row_num}");
-            sheet[f"A{row_num}"].value = f"UTILIDAD ({utilidad}%)";
-            sheet[f"F{row_num}"].value = f"={subtotal_cell}*{utilidad / 100}";
-            sheet[f"F{row_num}"].number_format = '"$"#,##0.00';
-            sheet[f"A{row_num}"].alignment = Alignment(horizontal="right");
-            row_num += 1
-            sheet.merge_cells(f"A{row_num}:E{row_num}");
-            sheet[f"A{row_num}"].value = f"IVA SOBRE UTILIDAD ({iva_utilidad}%)";
-            sheet[f"F{row_num}"].value = f"={util_cell}*{iva_utilidad / 100}";
-            sheet[f"F{row_num}"].number_format = '"$"#,##0.00';
-            sheet[f"A{row_num}"].alignment = Alignment(horizontal="right");
-            row_num += 1
+        ### SOLUCIÓN AL PROBLEMA 1: LÓGICA PARA PERSONA JURÍDICA VS NATURAL ###
+        if tipo_persona.lower() == "jurídica":
+            # Lógica completa para AIU
+            # Aplicar estilos a las filas de totales
+
+            admin_row_num = row_num
+            impr_row_num = row_num + 1
+            util_row_num = row_num + 2
+            iva_row_num = row_num + 3
+            total_row_num = row_num + 4
+            # Aplicar estilos y bordes a las filas de totales
+            for i in range(admin_row_num, total_row_num + 1):
+                sheet[f"A{i}"].alignment = Alignment(horizontal="right")
+                sheet[f"F{i}"].number_format = '"$"#,##0.00'
+                sheet[f"A{i}"].font = total_font
+                sheet[f"F{i}"].font = total_font
+            # Aplicar color y bordes gruesos por fuera
+            self.aplicar_bordes_totales(sheet, subtotal_row_num, total_row_num, color_hex="D9EAD3")
+
+            # Administración
+            sheet.merge_cells(f"A{admin_row_num}:E{admin_row_num}");
+            sheet[f"A{admin_row_num}"].value = f"ADMINISTRACIÓN ({administracion}%)"
+            sheet[f"F{admin_row_num}"].value = f"={subtotal_cell_address}*({administracion}/100)"
+
+            # Imprevistos
+            sheet.merge_cells(f"A{impr_row_num}:E{impr_row_num}");
+            sheet[f"A{impr_row_num}"].value = f"IMPREVISTOS ({imprevistos}%)"
+            sheet[f"F{impr_row_num}"].value = f"={subtotal_cell_address}*({imprevistos}/100)"
+
+            # Utilidad
+            sheet.merge_cells(f"A{util_row_num}:E{util_row_num}");
+            sheet[f"A{util_row_num}"].value = f"UTILIDAD ({utilidad}%)"
+            sheet[f"F{util_row_num}"].value = f"={subtotal_cell_address}*({utilidad}/100)"
+
+            # IVA sobre Utilidad
+            sheet.merge_cells(f"A{iva_row_num}:E{iva_row_num}");
+            sheet[f"A{iva_row_num}"].value = f"IVA SOBRE UTILIDAD ({iva_utilidad}%)"
+            sheet[f"F{iva_row_num}"].value = f"=F{util_row_num}*({iva_utilidad}/100)"
+
+            # Fila de Total Final
+            sheet.merge_cells(f"A{total_row_num}:E{total_row_num}");
+            sheet[f"A{total_row_num}"].value = "VALOR TOTAL COTIZACIÓN"
+            sheet[f"F{total_row_num}"].value = f"=SUM(F{subtotal_row_num}:F{iva_row_num})"
+
+            # Aplicar estilos a las filas de totales
+            for i in range(admin_row_num, total_row_num + 1):
+                sheet[f"A{i}"].alignment = Alignment(horizontal="right")
+                sheet[f"F{i}"].number_format = '"$"#,##0.00'
+                if i == total_row_num:
+                    sheet[f"A{i}"].font = total_font
+                    sheet[f"F{i}"].font = total_font
+                    sheet[f"A{i}"].fill = header_fill
+                    sheet[f"F{i}"].fill = header_fill
+            self.aplicar_bordes_totales_con_marco_grueso(sheet, subtotal_row_num, total_row_num, color_hex="D9EAD3")
+
         else:  # Persona Natural
-            sheet.merge_cells(f"A{row_num}:E{row_num}");
-            sheet[f"A{row_num}"].value = f"IVA ({iva_utilidad}%)";
-            sheet[f"F{row_num}"].value = f"={subtotal_cell}*{iva_utilidad / 100}";
-            sheet[f"F{row_num}"].number_format = '"$"#,##0.00';
-            sheet[f"A{row_num}"].alignment = Alignment(horizontal="right");
-            row_num += 1
+            # Lógica simple con IVA sobre el subtotal
+            iva_row_num = row_num
+            total_row_num = row_num + 1
 
-        sheet.merge_cells(f"A{row_num}:E{row_num}")
-        sheet[f"A{row_num}"].value = "VALOR TOTAL COTIZACIÓN"
-        sheet[f"A{row_num}"].font = Font(bold=True)
-        sheet[f"A{row_num}"].alignment = Alignment(horizontal="right")
-        sheet[f"F{row_num}"].value = f"=SUM(F{total_row}:F{row_num - 1})"
-        sheet[f"F{row_num}"].number_format = '"$"#,##0.00'
-        sheet[f"F{row_num}"].font = Font(bold=True)
+            # IVA
+            sheet.merge_cells(f"A{iva_row_num}:E{iva_row_num}");
+            sheet[f"A{iva_row_num}"].value = f"IVA ({iva_utilidad}%)"
+            sheet[f"F{iva_row_num}"].value = f"={subtotal_cell_address}*({iva_utilidad}/100)"
+            sheet[f"A{iva_row_num}"].alignment = Alignment(horizontal="right")
+            sheet[f"F{iva_row_num}"].number_format = '"$"#,##0.00'
 
-        # --- Bordes (sin cambios) ---
-        for row in sheet.iter_rows(min_row=1, max_row=row_num, min_col=1, max_col=6):
-            for cell in row:
-                cell.border = Border(left=thin_border, right=thin_border, top=thin_border, bottom=thin_border)
+            # Fila de Total Final
+            sheet.merge_cells(f"A{total_row_num}:E{total_row_num}");
+            sheet[f"A{total_row_num}"].value = "VALOR TOTAL COTIZACIÓN"
+            sheet[f"F{total_row_num}"].value = f"=SUM(F{subtotal_row_num}, F{iva_row_num})"
+            sheet[f"A{total_row_num}"].font = total_font;
+            sheet[f"F{total_row_num}"].font = total_font
+            sheet[f"A{total_row_num}"].alignment = Alignment(horizontal="right")
+            sheet[f"F{total_row_num}"].number_format = '"$"#,##0.00'
+            sheet[f"A{total_row_num}"].fill = header_fill
+            sheet[f"F{total_row_num}"].fill = header_fill
 
-        # --- Guardar archivo (sin cambios) ---
+            self.aplicar_bordes_totales_con_marco_grueso(sheet, subtotal_row_num, total_row_num, color_hex="D9EAD3")
+
+        # 6. --- GUARDAR EL ARCHIVO ---
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        # Guardar en una carpeta 'output' para mantener el orden
-        output_dir = os.path.join(os.getcwd(), "output")
-        os.makedirs(output_dir, exist_ok=True)
-        excel_path = os.path.join(output_dir, f"cotizacion_{timestamp}.xlsx")
+        export_dir = "exports"
+        if not os.path.exists(export_dir): os.makedirs(export_dir)
+        excel_path = os.path.join(export_dir, f"cotizacion_{timestamp}.xlsx")
 
-        workbook.save(excel_path)
-        workbook.close()
-
-        print(f"Archivo Excel guardado en: {excel_path}")
-        return excel_path
+        try:
+            workbook.save(excel_path)
+            print(f"Archivo Excel guardado en: {excel_path}")
+            return excel_path
+        except Exception as e:
+            print(f"Error al guardar el archivo Excel: {e}")
+            return None

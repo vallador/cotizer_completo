@@ -6,6 +6,7 @@ import sqlite3
 
 
 
+
 class DatabaseManager:
     def __init__(self, db_path="data/cotizaciones.db"): # Ruta corregida para ser más robusta
         self.db_path = db_path
@@ -423,6 +424,45 @@ class DatabaseManager:
         except Exception as e:
             print(f"Error al obtener capítulo por ID: {str(e)}")
             return None
+
+    def add_chapter(self, nombre, descripcion):
+        sql = "INSERT INTO capitulos (nombre, descripcion) VALUES (?, ?)"
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute(sql, (nombre, descripcion))
+            self.connection.commit()
+            last_id = cursor.lastrowid
+            print(f"DEBUG (DB): Capítulo '{nombre}' agregado con ID: {last_id}")
+            return last_id
+        except Exception as e:
+            print(f"ERROR (DB): No se pudo agregar el capítulo. Error: {e}")
+            return None
+
+    def update_chapter(self, chapter_id, nombre, descripcion):
+        """Actualiza el nombre y la descripción de un capítulo existente."""
+        sql = "UPDATE capitulos SET nombre = ?, descripcion = ? WHERE id = ?"
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute(sql, (nombre, descripcion, chapter_id))
+            self.connection.commit()
+            print(f"DEBUG (DB): Capítulo ID {chapter_id} actualizado.")
+            return True
+        except sqlite3.Error as e:
+            print(f"ERROR (DB): No se pudo actualizar el capítulo {chapter_id}. Error: {e}")
+            return False
+
+    def delete_chapter(self, chapter_id):
+        """Elimina un capítulo de la base de datos usando su ID."""
+        sql = "DELETE FROM capitulos WHERE id = ?"
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute(sql, (chapter_id,))
+            self.connection.commit()
+            print(f"DEBUG (DB): Capítulo con ID {chapter_id} eliminado.")
+            return True
+        except Exception as e:
+            print(f"ERROR (DB): No se pudo eliminar el capítulo {chapter_id}. Error: {e}")
+            return False
 
     def add_product(self, product_data):
         """Agrega un nuevo producto a la base de datos."""

@@ -1116,15 +1116,26 @@ class DataManagementWindow(QMainWindow):
         return chapter_widget
 
     def refresh_chapters_table(self):
-        # Necesitarás añadir get_all_chapters al controller
-        chapters = self.controller.get_all_chapters()
-        self.chapters_table.setRowCount(0)
-        for chapter in chapters:
-            row = self.chapters_table.rowCount()
-            self.chapters_table.insertRow(row)
-            self.chapters_table.setItem(row, 0, QTableWidgetItem(str(chapter['id'])))
-            self.chapters_table.setItem(row, 1, QTableWidgetItem(chapter['nombre']))
-        self.clear_chapter_form()
+        print("DEBUG (UI): Refrescando tabla de capítulos...")
+        try:
+            chapters = self.controller.get_all_chapters()
+            self.chapters_table.setRowCount(0)
+
+            for chapter in chapters:
+                row = self.chapters_table.rowCount()
+                self.chapters_table.insertRow(row)
+                id_item = QTableWidgetItem(str(chapter['id']))
+
+                id_item.setData(Qt.UserRole, chapter['id'])
+                self.chapters_table.setItem(row, 0, id_item)
+                self.chapters_table.setItem(row, 1, QTableWidgetItem(chapter['nombre']))
+
+            self.clear_chapter_form()
+            print("DEBUG (UI): Tabla refrescada correctamente.")
+        except Exception as e:
+            print(f"ERROR (UI): Fallo al refrescar la tabla de capítulos: {e}")
+            import traceback
+            traceback.print_exc()
 
     def load_chapter_to_form(self):
         selected_rows = self.chapters_table.selectionModel().selectedRows()
@@ -1138,17 +1149,99 @@ class DataManagementWindow(QMainWindow):
         self.chapter_id_label.clear()
         self.chapter_name_input.clear()
 
-    def save_chapter(self):
-        # Lógica para guardar o actualizar un capítulo (necesitarás los métodos en el controller/manager)
-        QMessageBox.information(self, "Info",
-                                "Funcionalidad para guardar capítulo pendiente de implementación en el controlador.")
-        self.refresh_chapters_table()
-
     def delete_chapter(self):
-        # Lógica para eliminar un capítulo
-        QMessageBox.information(self, "Info",
-                                "Funcionalidad para eliminar capítulo pendiente de implementación en el controlador.")
-        self.refresh_chapters_table()
+        print("DEBUG (UI): Iniciando delete_chapter")
+        try:
+            selected_rows = self.chapters_table.selectionModel().selectedRows()
+            if not selected_rows:
+                QMessageBox.warning(self, "Atención", "Debe seleccionar un capítulo para eliminar.")
+                return
+            item = self.chapters_table.item(selected_rows[0].row(), 0)
+            if not item:
+                QMessageBox.critical(self, "Error", "No se pudo obtener la información del ítem seleccionado.")
+                return
+
+            chapter_id = item.data(Qt.UserRole)
+
+            if chapter_id is None:
+                QMessageBox.critical(self, "Error Crítico", "El ID del capítulo es Nulo. No se puede eliminar.")
+                return
+
+            print(f"DEBUG (UI): ID del capítulo a eliminar: {chapter_id} (Tipo: {type(chapter_id)})")
+
+            reply = QMessageBox.question(self, "Confirmar Eliminación",
+                                         f"¿Está seguro de que desea eliminar el capítulo con ID {chapter_id}?",
+                                         QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+
+
+            if reply == QMessageBox.Yes:
+                print("DEBUG: Usuario confirmó eliminación")
+                print(f"DEBUG: Llamando a controller.delete_chapter con ID: {chapter_id}")
+
+                result = self.controller.delete_chapter(chapter_id)
+                print(f"DEBUG: Resultado del controller: {result}")
+
+                print("DEBUG: Mostrando mensaje de éxito")
+                QMessageBox.information(self, "Éxito", "Capítulo eliminado correctamente.")
+
+                print("DEBUG: Refrescando tabla")
+                self.refresh_chapters_table()
+
+                print("DEBUG: Limpiando formulario")
+                self.clear_chapter_form()
+
+                print("DEBUG: delete_chapter completado exitosamente")
+            else:
+                print("DEBUG: Usuario canceló eliminación")
+
+        except Exception as e:
+            print(f"DEBUG: Error en delete_chapter: {str(e)}")
+            print(f"DEBUG: Tipo de error: {type(e)}")
+            import traceback
+            print(f"DEBUG: Traceback completo:")
+            traceback.print_exc()
+            QMessageBox.critical(self, "Error", f"Error al eliminar capítulo: {str(e)}")
+
+
+
+    def save_chapter(self):
+        print("DEBUG: Iniciando save_chapter")
+        try:
+            # --- PASO 1: Recolectar los datos SIEMPRE ---
+            chapter_id = self.chapter_id_label.text()
+            name = self.chapter_name_input.text()
+
+            if not name:
+                QMessageBox.warning(self, "Error", "El nombre del capítulo es obligatorio.")
+                return
+
+            # --- PASO 2: Crear el diccionario de datos ---
+            chapter_data = {
+                'nombre': name,
+                'descripcion': name  # La descripción es igual al nombre
+            }
+
+            # --- PASO 3: Decidir si actualizar o agregar ---
+            if chapter_id:
+                print("DEBUG: ID detectado. Ejecutando actualización.")
+                # Llama al controlador con el ID y los datos
+                self.controller.update_chapter(int(chapter_id), chapter_data)
+                QMessageBox.information(self, "Éxito", "Capítulo actualizado correctamente.")
+            else:
+                print("DEBUG: No hay ID. Ejecutando creación.")
+                # Llama al controlador solo con los datos
+                self.controller.add_chapter(chapter_data)
+                QMessageBox.information(self, "Éxito", "Capítulo agregado correctamente.")
+
+            # --- PASO 4: Refrescar y limpiar (común a ambos casos) ---
+            self.refresh_chapters_table()
+            self.clear_chapter_form()
+
+        except Exception as e:
+            print(f"DEBUG: Error en save_chapter: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(self, "Error", f"Ocurrió un error inesperado al guardar: {str(e)}")
 
         # --- PESTAÑA PARA GESTIONAR AIU ---
 
@@ -1200,7 +1293,6 @@ class DataManagementWindow(QMainWindow):
             'utilidad': self.util_spinbox.value(),
             'iva_sobre_utilidad': self.iva_spinbox.value()
         }
-        # El método update_aiu_values ya existe en el manager
         success = self.controller.aiu_manager.update_aiu_values(**new_values)
         if success:
             QMessageBox.information(self, "Éxito", "Los valores AIU se han actualizado.")

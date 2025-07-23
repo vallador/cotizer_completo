@@ -35,12 +35,29 @@ class CotizacionController:
         """Obtiene todos los clientes de la base de datos"""
         return self.database_manager.get_all_clients()
 
+    def add_chapter(self, chapter_data):
+        """Agrega un capítulo a la base de datos"""
+        # Pasa el diccionario completo (nombre y descripcion) al manager
+        return self.database_manager.add_chapter(**chapter_data)
+
+    def update_chapter(self, chapter_id, chapter_data):
+        """Actualiza un capítulo en la base de datos"""
+        return self.database_manager.update_chapter(chapter_id, **chapter_data)
+
+    def get_all_chapters(self):
+        """Obtiene todos los capítulos de la base de datos"""
+        return self.database_manager.get_all_chapters()
+
+    def delete_chapter(self, chapter_id):
+        """Pasa la solicitud de eliminación al DatabaseManager."""
+        print(f"DEBUG (Controller): Pasando solicitud para eliminar capítulo ID: {chapter_id}")
+        return self.database_manager.delete_chapter(chapter_id)
+
     def add_activity(self, activity_data):
         """Agrega una actividad a la base de datos"""
         return self.database_manager.add_activity(**activity_data)
 
-    def get_all_chapters(self):
-        return self.database_manager.get_all_chapters()
+
 
     def update_activity(self, activity_id, activity_data):
         """Actualiza una actividad en la base de datos"""
