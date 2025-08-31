@@ -12,6 +12,34 @@ class ExcelController:
         self.cotizacion_controller = cotizacion_controller
         self.aiu_manager = aiu_manager
 
+    def bordes_marco_con_interior(self, sheet, start_row, end_row, start_col=1, end_col=6):
+        # Estilos
+        grueso = Side(border_style="medium", color="000000")
+        delgado = Side(border_style="thin", color="000000")
+
+        for row in range(start_row, end_row + 1):
+            for col in range(start_col, end_col + 1):
+                cell = sheet.cell(row=row, column=col)
+
+                # Por defecto, bordes internos son delgados
+                left = delgado
+                right = delgado
+                top = delgado
+                bottom = delgado
+
+                # Bordes exteriores → gruesos
+                if col == start_col:  # primera columna
+                    left = grueso
+                if col == end_col:  # última columna
+                    right = grueso
+                if row == start_row:  # primera fila
+                    top = grueso
+                if row == end_row:  # última fila
+                    bottom = grueso
+
+                cell.border = Border(left=left, right=right, top=top, bottom=bottom)
+
+
     def aplicar_bordes_totales(self, sheet, start_row, end_row, color_hex):
         """Aplica bordes exteriores gruesos y bordes interiores delgados a un bloque de celdas."""
         thin = Side(border_style="thin", color="000000")
@@ -108,16 +136,8 @@ class ExcelController:
                 cell.alignment = center_alignment
                 row_num += 1
 
-
-            # Reemplaza tu bloque 'elif item['type'] == 'activity':' con este:
-
             elif item['type'] == 'activity':
 
-                # --- LÓGICA PARA INSERTAR FILA DE ACTIVIDAD (VERSIÓN ROBUSTA) ---
-
-                # 1. Asignar valores a las celdas. Para las celdas numéricas,
-
-                #    asegurarse de que el tipo de dato sea float/int, no string.
 
                 total_actividad = float(item['cantidad']) * float(item['valor_unitario'])
 
@@ -135,7 +155,6 @@ class ExcelController:
 
                 # 2. Aplicar alineaciones a todas las celdas de la fila.
 
-                #    Esto es seguro y no causa errores de tipo.
 
                 sheet.cell(row=row_num, column=1).alignment = center_alignment
 
@@ -166,15 +185,17 @@ class ExcelController:
         # Fila de Subtotal
         sheet.merge_cells(f"A{subtotal_row_num}:E{subtotal_row_num}")
         sheet[f"A{subtotal_row_num}"].value = "SUBTOTAL COSTOS DIRECTOS"
-        sheet[f"A{subtotal_row_num}"].font = total_font
+        sheet[f"A{subtotal_row_num}"].font = header_font
+        sheet[f"A{subtotal_row_num}"].fill = header_fill
         sheet[f"A{subtotal_row_num}"].alignment = Alignment(horizontal="right")
         sheet[subtotal_cell_address].value = f"=SUM(F2:F{subtotal_row_num - 1})"
         sheet[subtotal_cell_address].number_format = '"$"#,##0.00'
-        sheet[subtotal_cell_address].font = total_font
+        sheet[subtotal_cell_address].font = header_font
+        sheet[subtotal_cell_address].fill = header_fill
+        self.bordes_marco_con_interior(sheet, subtotal_row_num, subtotal_row_num)
         row_num += 1
 
-        ### SOLUCIÓN AL PROBLEMA 1: LÓGICA PARA PERSONA JURÍDICA VS NATURAL ###
-        if tipo_persona.lower() == "jurídica":
+        if tipo_persona.lower() == "juridica":
             # Lógica completa para AIU
             # Aplicar estilos a las filas de totales
 
@@ -190,7 +211,7 @@ class ExcelController:
                 sheet[f"A{i}"].font = total_font
                 sheet[f"F{i}"].font = total_font
             # Aplicar color y bordes gruesos por fuera
-            self.aplicar_bordes_totales(sheet, subtotal_row_num, total_row_num, color_hex="D9EAD3")
+            self.aplicar_bordes_totales(sheet, admin_row_num, total_row_num, color_hex="D9EAD3")
 
             # Administración
             sheet.merge_cells(f"A{admin_row_num}:E{admin_row_num}");
@@ -216,17 +237,18 @@ class ExcelController:
             sheet.merge_cells(f"A{total_row_num}:E{total_row_num}");
             sheet[f"A{total_row_num}"].value = "VALOR TOTAL COTIZACIÓN"
             sheet[f"F{total_row_num}"].value = f"=SUM(F{subtotal_row_num}:F{iva_row_num})"
+            self.bordes_marco_con_interior(sheet,total_row_num,total_row_num)
 
             # Aplicar estilos a las filas de totales
             for i in range(admin_row_num, total_row_num + 1):
                 sheet[f"A{i}"].alignment = Alignment(horizontal="right")
                 sheet[f"F{i}"].number_format = '"$"#,##0.00'
                 if i == total_row_num:
-                    sheet[f"A{i}"].font = total_font
-                    sheet[f"F{i}"].font = total_font
+                    sheet[f"A{i}"].font = header_font
+                    sheet[f"F{i}"].font = header_font
                     sheet[f"A{i}"].fill = header_fill
                     sheet[f"F{i}"].fill = header_fill
-            self.aplicar_bordes_totales_con_marco_grueso(sheet, subtotal_row_num, total_row_num, color_hex="D9EAD3")
+            self.bordes_marco_con_interior(sheet, 1, total_row_num)
 
         else:  # Persona Natural
             # Lógica simple con IVA sobre el subtotal
@@ -244,14 +266,16 @@ class ExcelController:
             sheet.merge_cells(f"A{total_row_num}:E{total_row_num}");
             sheet[f"A{total_row_num}"].value = "VALOR TOTAL COTIZACIÓN"
             sheet[f"F{total_row_num}"].value = f"=SUM(F{subtotal_row_num}, F{iva_row_num})"
-            sheet[f"A{total_row_num}"].font = total_font;
-            sheet[f"F{total_row_num}"].font = total_font
+            sheet[f"A{total_row_num}"].font = header_font;
+            sheet[f"F{total_row_num}"].font = header_font
             sheet[f"A{total_row_num}"].alignment = Alignment(horizontal="right")
             sheet[f"F{total_row_num}"].number_format = '"$"#,##0.00'
             sheet[f"A{total_row_num}"].fill = header_fill
             sheet[f"F{total_row_num}"].fill = header_fill
+            self.bordes_marco_con_interior(sheet, total_row_num, total_row_num)
 
-            self.aplicar_bordes_totales_con_marco_grueso(sheet, subtotal_row_num, total_row_num, color_hex="D9EAD3")
+            self.aplicar_bordes_totales_con_marco_grueso(sheet, iva_row_num, iva_row_num, color_hex="D9EAD3")
+            self.bordes_marco_con_interior(sheet, 1, total_row_num)
 
         # 6. --- GUARDAR EL ARCHIVO ---
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

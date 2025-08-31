@@ -1,232 +1,603 @@
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QFormLayout, QCheckBox, QMessageBox, QFileDialog, QGroupBox, QComboBox, QSpinBox, QRadioButton, QButtonGroup
-from PyQt5.QtCore import Qt
+import sys
+from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
+                             QLabel, QLineEdit, QTextEdit, QComboBox, QCheckBox,
+                             QPushButton, QGroupBox, QScrollArea, QWidget,
+                             QDateEdit, QSpinBox, QFileDialog, QListWidget,
+                             QMessageBox, QTabWidget, QGridLayout)
+from PyQt5.QtCore import QDate, Qt
+from PyQt5.QtGui import QFont
 import os
-from controllers.word_controller import WordController
 
-class WordConfigDialog(QDialog):
-    def __init__(self, cotizacion_controller, cotizacion_id, excel_path, parent=None):
+
+class ImprovedWordConfigDialog(QDialog):
+    def __init__(self, parent=None, client_type="natural", client_data=None, precarga_data=None):
         super().__init__(parent)
-        self.setWindowTitle("Configuración de Documento Word")
-        self.setMinimumWidth(600)
-        
-        self.cotizacion_controller = cotizacion_controller
-        self.cotizacion_id = cotizacion_id
-        self.excel_path = excel_path
-        self.word_controller = WordController(cotizacion_controller)
-        
-        # Obtener la cotización
-        self.cotizacion = cotizacion_controller.obtener_cotizacion(cotizacion_id)
-        if not self.cotizacion:
-            QMessageBox.critical(self, "Error", f"No se encontró la cotización con ID {cotizacion_id}")
-            self.reject()
-            return
-        
-        # Crear layout principal
-        main_layout = QVBoxLayout(self)
-        
-        # Grupo de formato de documento
-        format_group = QGroupBox("Formato del Documento")
-        format_layout = QVBoxLayout()
-        
-        # Opciones de formato
-        self.formato_largo_radio = QRadioButton("Formato Largo (Detallado)")
-        self.formato_corto_radio = QRadioButton("Formato Corto (Resumido)")
-        
-        # Grupo de botones para formato
-        formato_group = QButtonGroup(self)
-        formato_group.addButton(self.formato_largo_radio)
-        formato_group.addButton(self.formato_corto_radio)
-        
-        # Seleccionar formato predeterminado según tipo de cliente
-        if self.cotizacion.cliente.tipo.lower() == 'jurídica':
-            self.formato_largo_radio.setChecked(True)
+        self.client_type = client_type
+        self.client_data = client_data or {}
+        self.precarga_data = precarga_data or {}
+        self.selected_files = []
+
+        self.setWindowTitle("Configuración de Documento Word - Cotización")
+        self.setModal(True)
+        self.resize(800, 600)
+
+        self.setup_ui()
+        self.precargar_datos()
+
+    def setup_ui(self):
+        """Configura la interfaz de usuario"""
+        main_layout = QVBoxLayout()
+        self.setLayout(main_layout)
+
+        # Título
+        title_label = QLabel(f"Configuración para Cliente {self.client_type.title()}")
+        title_font = QFont()
+        title_font.setPointSize(14)
+        title_font.setBold(True)
+        title_label.setFont(title_font)
+        title_label.setAlignment(Qt.AlignCenter)
+        main_layout.addWidget(title_label)
+
+        # Crear pestañas
+        self.tab_widget = QTabWidget()
+        main_layout.addWidget(self.tab_widget)
+
+        # Pestaña de información básica
+        self.create_basic_info_tab()
+
+        # Pestaña de condiciones comerciales
+        self.create_commercial_conditions_tab()
+
+        # Pestaña específica según tipo de cliente
+        if self.client_type == 'juridica':
+            self.create_juridica_specific_tab()
         else:
-            self.formato_corto_radio.setChecked(True)
-            # Deshabilitar formato largo para clientes naturales
-            self.formato_largo_radio.setEnabled(False)
-        
-        format_layout.addWidget(self.formato_largo_radio)
-        format_layout.addWidget(self.formato_corto_radio)
-        format_group.setLayout(format_layout)
-        main_layout.addWidget(format_group)
-        
-        # Grupo de información del trabajo
-        info_group = QGroupBox("Información del Trabajo")
-        info_layout = QFormLayout()
-        
-        self.referencia_input = QLineEdit("Servicios de construcción y mantenimiento")
-        self.validez_spin = QSpinBox()
-        self.validez_spin.setRange(1, 180)
-        self.validez_spin.setValue(30)
-        
-        info_layout.addRow("Referencia del Trabajo:", self.referencia_input)
-        info_layout.addRow("Validez de la Oferta (días):", self.validez_spin)
-        
-        info_group.setLayout(info_layout)
-        main_layout.addWidget(info_group)
-        
-        # Grupo de personal y plazos
-        personal_group = QGroupBox("Personal y Plazos")
-        personal_layout = QFormLayout()
-        
-        self.cuadrillas_combo = QComboBox()
-        self.cuadrillas_combo.addItems(["una", "dos", "tres"])
-        
-        self.operarios_spin = QSpinBox()
-        self.operarios_spin.setRange(1, 20)
-        self.operarios_spin.setValue(2)
-        
-        self.plazo_spin = QSpinBox()
-        self.plazo_spin.setRange(1, 365)
-        self.plazo_spin.setValue(15)
-        
-        personal_layout.addRow("Número de Cuadrillas:", self.cuadrillas_combo)
-        personal_layout.addRow("Número de Operarios:", self.operarios_spin)
-        personal_layout.addRow("Plazo de Ejecución (días hábiles):", self.plazo_spin)
-        
+            self.create_natural_specific_tab()
+
+        # Botones
+        buttons_layout = QHBoxLayout()
+
+        self.cancel_button = QPushButton("Cancelar")
+        self.cancel_button.clicked.connect(self.reject)
+        buttons_layout.addWidget(self.cancel_button)
+
+        buttons_layout.addStretch()
+
+        self.generate_button = QPushButton("Generar Documento")
+        self.generate_button.clicked.connect(self.validate_and_accept)
+        self.generate_button.setDefault(True)
+        buttons_layout.addWidget(self.generate_button)
+
+        main_layout.addLayout(buttons_layout)
+
+    def create_basic_info_tab(self):
+        """Crea la pestaña de información básica"""
+        tab = QWidget()
+        layout = QFormLayout()
+
+        # Fecha actual
+        self.fecha_edit = QDateEdit(QDate.currentDate())
+        self.fecha_edit.setCalendarPopup(True)
+        layout.addRow("Fecha del documento:", self.fecha_edit)
+
+        # Referencia del trabajo
+        self.referencia_edit = QLineEdit()
+        self.referencia_edit.setPlaceholderText("Ej: Mantenimiento de fachadas - Conjunto Residencial")
+        layout.addRow("Referencia del trabajo:*", self.referencia_edit)
+
+        # Título del trabajo
+        self.titulo_edit = QLineEdit()
+        self.titulo_edit.setPlaceholderText("Ej: COTIZACIÓN PARA MANTENIMIENTO DE FACHADAS")
+        layout.addRow("Título del trabajo:*", self.titulo_edit)
+
+        # Lugar de intervención
+        self.lugar_edit = QLineEdit()
+        self.lugar_edit.setPlaceholderText("Ej: Conjunto Residencial Las Flores")
+        layout.addRow("Lugar de intervención:*", self.lugar_edit)
+
+        # Concepto general del trabajo
+        self.concepto_edit = QTextEdit()
+        self.concepto_edit.setMaximumHeight(80)
+        self.concepto_edit.setPlaceholderText("Descripción general del trabajo a realizar...")
+        layout.addRow("Concepto general:*", self.concepto_edit)
+
+        tab.setLayout(layout)
+        self.tab_widget.addTab(tab, "Información Básica")
+
+    def precargar_datos(self):
+        """Precarga los datos del cliente en los campos correspondientes"""
+        if self.precarga_data:
+            # Precargar referencia si está disponible
+            if 'referencia' in self.precarga_data and hasattr(self, 'referencia_edit'):
+                self.referencia_edit.setText(self.precarga_data['referencia'])
+
+            # Precargar título si está disponible
+            if 'titulo' in self.precarga_data and hasattr(self, 'titulo_edit'):
+                self.titulo_edit.setText(self.precarga_data['titulo'])
+
+            # Precargar lugar si está disponible
+            if 'lugar' in self.precarga_data and hasattr(self, 'lugar_edit'):
+                self.lugar_edit.setText(self.precarga_data['lugar'])
+
+            # Precargar concepto si está disponible
+            if 'concepto' in self.precarga_data and hasattr(self, 'concepto_edit'):
+                self.concepto_edit.setText(self.precarga_data['concepto'])
+
+    def create_commercial_conditions_tab(self):
+        """Crea la pestaña de condiciones comerciales"""
+        tab = QWidget()
+        layout = QFormLayout()
+
+        # Validez de la oferta
+        self.validez_edit = QSpinBox()
+        self.validez_edit.setRange(1, 365)
+        self.validez_edit.setValue(30)
+        self.validez_edit.setSuffix(" días")
+        layout.addRow("Validez de la oferta:", self.validez_edit)
+
+        # Personal de obra
+        personal_group = QGroupBox("Personal de Obra")
+        personal_layout = QGridLayout()
+
+        self.cuadrillas_edit = QSpinBox()
+        self.cuadrillas_edit.setRange(1, 10)
+        self.cuadrillas_edit.setValue(1)
+        personal_layout.addWidget(QLabel("Número de cuadrillas:*"), 0, 0)
+        personal_layout.addWidget(self.cuadrillas_edit, 0, 1)
+
+        self.operarios_num_edit = QSpinBox()
+        self.operarios_num_edit.setRange(1, 20)
+        self.operarios_num_edit.setValue(2)
+        personal_layout.addWidget(QLabel("Operarios por cuadrilla:*"), 1, 0)
+        personal_layout.addWidget(self.operarios_num_edit, 1, 1)
+
+        self.operarios_letra_edit = QLineEdit()
+        self.operarios_letra_edit.setPlaceholderText("Ej: dos")
+        personal_layout.addWidget(QLabel("Operarios (en letra):"), 2, 0)
+        personal_layout.addWidget(self.operarios_letra_edit, 2, 1)
+
         personal_group.setLayout(personal_layout)
-        main_layout.addWidget(personal_group)
-        
-        # Grupo de forma de pago
+        layout.addRow(personal_group)
+
+        # Plazo de ejecución
+        plazo_group = QGroupBox("Plazo de Ejecución")
+        plazo_layout = QGridLayout()
+
+        self.plazo_dias_edit = QSpinBox()
+        self.plazo_dias_edit.setRange(1, 365)
+        self.plazo_dias_edit.setValue(15)
+        plazo_layout.addWidget(QLabel("Días:*"), 0, 0)
+        plazo_layout.addWidget(self.plazo_dias_edit, 0, 1)
+
+        self.plazo_tipo_combo = QComboBox()
+        self.plazo_tipo_combo.addItems(["hábiles", "calendario"])
+        plazo_layout.addWidget(QLabel("Tipo:"), 0, 2)
+        plazo_layout.addWidget(self.plazo_tipo_combo, 0, 3)
+
+        plazo_group.setLayout(plazo_layout)
+        layout.addRow(plazo_group)
+
+        # Forma de pago
         pago_group = QGroupBox("Forma de Pago")
         pago_layout = QVBoxLayout()
-        
-        # Opciones de pago
-        self.pago_contraentrega_radio = QRadioButton("Contraentrega")
-        self.pago_porcentajes_radio = QRadioButton("Porcentajes")
-        
-        # Grupo de botones para forma de pago
-        pago_button_group = QButtonGroup(self)
-        pago_button_group.addButton(self.pago_contraentrega_radio)
-        pago_button_group.addButton(self.pago_porcentajes_radio)
-        
-        self.pago_contraentrega_radio.setChecked(True)
-        
+
+        self.pago_contraentrega_radio = QCheckBox("Contraentrega")
+        self.pago_contraentrega_radio.toggled.connect(self.toggle_payment_details)
         pago_layout.addWidget(self.pago_contraentrega_radio)
+
+        self.pago_porcentajes_radio = QCheckBox("Por porcentajes")
+        self.pago_porcentajes_radio.toggled.connect(self.toggle_payment_details)
         pago_layout.addWidget(self.pago_porcentajes_radio)
-        
-        # Grupo de porcentajes (inicialmente oculto)
-        self.porcentajes_group = QGroupBox("Desglose de Porcentajes")
-        porcentajes_layout = QFormLayout()
-        
-        self.porcentaje_inicio_spin = QSpinBox()
-        self.porcentaje_inicio_spin.setRange(0, 100)
-        self.porcentaje_inicio_spin.setValue(30)
-        
-        self.porcentaje_avance_spin = QSpinBox()
-        self.porcentaje_avance_spin.setRange(0, 100)
-        self.porcentaje_avance_spin.setValue(40)
-        
-        self.avance_requerido_spin = QSpinBox()
-        self.avance_requerido_spin.setRange(1, 99)
-        self.avance_requerido_spin.setValue(50)
-        
-        self.porcentaje_final_spin = QSpinBox()
-        self.porcentaje_final_spin.setRange(0, 100)
-        self.porcentaje_final_spin.setValue(30)
-        
-        porcentajes_layout.addRow("Porcentaje al Inicio (%):", self.porcentaje_inicio_spin)
-        porcentajes_layout.addRow("Porcentaje al Avance (%):", self.porcentaje_avance_spin)
-        porcentajes_layout.addRow("Avance Requerido (%):", self.avance_requerido_spin)
-        porcentajes_layout.addRow("Porcentaje al Finalizar (%):", self.porcentaje_final_spin)
-        
-        self.porcentajes_group.setLayout(porcentajes_layout)
-        self.porcentajes_group.setVisible(False)
-        
-        # Conectar cambio de forma de pago
-        self.pago_contraentrega_radio.toggled.connect(self.toggle_porcentajes)
-        
-        pago_layout.addWidget(self.porcentajes_group)
+
+        # Detalles de pago por porcentajes
+        self.pago_details_widget = QWidget()
+        pago_details_layout = QGridLayout()
+
+        self.anticipo_edit = QSpinBox()
+        self.anticipo_edit.setRange(0, 100)
+        self.anticipo_edit.setSuffix("%")
+        pago_details_layout.addWidget(QLabel("Anticipo:"), 0, 0)
+        pago_details_layout.addWidget(self.anticipo_edit, 0, 1)
+
+        self.avance_edit = QSpinBox()
+        self.avance_edit.setRange(0, 100)
+        self.avance_edit.setSuffix("%")
+        pago_details_layout.addWidget(QLabel("Al % de avance:"), 1, 0)
+        pago_details_layout.addWidget(self.avance_edit, 1, 1)
+
+        self.avance_requerido_edit = QSpinBox()
+        self.avance_requerido_edit.setRange(1, 100)
+        self.avance_requerido_edit.setValue(50)
+        self.avance_requerido_edit.setSuffix("%")
+        pago_details_layout.addWidget(QLabel("Cuando se alcance:"), 1, 2)
+        pago_details_layout.addWidget(self.avance_requerido_edit, 1, 3)
+
+        self.final_edit = QSpinBox()
+        self.final_edit.setRange(0, 100)
+        self.final_edit.setSuffix("%")
+        pago_details_layout.addWidget(QLabel("Al finalizar:"), 2, 0)
+        pago_details_layout.addWidget(self.final_edit, 2, 1)
+
+        self.pago_details_widget.setLayout(pago_details_layout)
+        self.pago_details_widget.setEnabled(False)
+        pago_layout.addWidget(self.pago_details_widget)
+
+        # Campo de texto libre para forma de pago personalizada
+        self.pago_personalizado_edit = QTextEdit()
+        self.pago_personalizado_edit.setMaximumHeight(60)
+        self.pago_personalizado_edit.setPlaceholderText("Escriba aquí una forma de pago personalizada...")
+        pago_layout.addWidget(QLabel("Forma de pago personalizada:"))
+        pago_layout.addWidget(self.pago_personalizado_edit)
+
         pago_group.setLayout(pago_layout)
-        main_layout.addWidget(pago_group)
-        
-        # Botones de acción
-        buttons_layout = QHBoxLayout()
-        
-        self.generate_btn = QPushButton("Generar Documento")
-        self.generate_btn.clicked.connect(self.generate_document)
-        
-        self.cancel_btn = QPushButton("Cancelar")
-        self.cancel_btn.clicked.connect(self.reject)
-        
-        buttons_layout.addWidget(self.generate_btn)
-        buttons_layout.addWidget(self.cancel_btn)
-        
-        main_layout.addLayout(buttons_layout)
-    
-    def toggle_porcentajes(self, checked):
-        """Muestra u oculta el grupo de porcentajes según la selección"""
-        self.porcentajes_group.setVisible(not checked)
-    
-    def generate_document(self):
-        """Genera el documento Word con la configuración actual"""
+        layout.addRow(pago_group)
+
+        tab.setLayout(layout)
+        self.tab_widget.addTab(tab, "Condiciones Comerciales")
+
+    def create_natural_specific_tab(self):
+        """Crea la pestaña específica para persona natural"""
+        tab = QWidget()
+        layout = QVBoxLayout()
+
+        info_label = QLabel("Configuración específica para Persona Natural")
+        info_label.setStyleSheet("font-weight: bold; color: #2E8B57;")
+        layout.addWidget(info_label)
+
+        # Formato simple
+        format_group = QGroupBox("Formato del Documento")
+        format_layout = QVBoxLayout()
+
+        self.formato_simple_check = QCheckBox("Usar formato simplificado (recomendado)")
+        self.formato_simple_check.setChecked(True)
+        format_layout.addWidget(self.formato_simple_check)
+
+        info_text = QLabel(
+            "El formato simplificado excluye información empresarial compleja y se enfoca en los aspectos esenciales de la cotización.")
+        info_text.setWordWrap(True)
+        info_text.setStyleSheet("color: #666; font-style: italic;")
+        format_layout.addWidget(info_text)
+
+        format_group.setLayout(format_layout)
+        layout.addWidget(format_group)
+
+        # Información adicional
+        adicional_group = QGroupBox("Información Adicional")
+        adicional_layout = QFormLayout()
+
+        self.incluir_iva_check = QCheckBox("Los precios incluyen IVA")
+        self.incluir_iva_check.setChecked(True)
+        adicional_layout.addRow(self.incluir_iva_check)
+
+        self.incluir_materiales_check = QCheckBox("Incluir nota sobre materiales")
+        self.incluir_materiales_check.setChecked(True)
+        adicional_layout.addRow(self.incluir_materiales_check)
+
+        adicional_group.setLayout(adicional_layout)
+        layout.addWidget(adicional_group)
+
+        layout.addStretch()
+        tab.setLayout(layout)
+        self.tab_widget.addTab(tab, "Configuración Específica")
+
+    def update_files_list(self):
+        """Actualiza la lista visual de archivos seleccionados"""
         try:
-            # Determinar formato
-            formato = 'largo' if self.formato_largo_radio.isChecked() else 'corto'
-            
-            # Determinar forma de pago
-            forma_pago = 'contraentrega' if self.pago_contraentrega_radio.isChecked() else 'porcentajes'
-            
-            # Preparar datos adicionales
-            datos_adicionales = {
-                'referencia': self.referencia_input.text(),
-                'validez': self.validez_spin.value(),
-                'cuadrillas': self.cuadrillas_combo.currentText(),
-                'operarios': self.operarios_spin.value(),
-                'plazo': self.plazo_spin.value(),
-                'forma_pago': forma_pago
-            }
-            
-            # Agregar porcentajes si aplica
-            if forma_pago == 'porcentajes':
-                datos_adicionales.update({
-                    'porcentaje_inicio': self.porcentaje_inicio_spin.value(),
-                    'porcentaje_avance': self.porcentaje_avance_spin.value(),
-                    'avance_requerido': self.avance_requerido_spin.value(),
-                    'porcentaje_final': self.porcentaje_final_spin.value()
-                })
-                
-                # Validar que los porcentajes sumen 100%
-                total = (datos_adicionales['porcentaje_inicio'] + 
-                         datos_adicionales['porcentaje_avance'] + 
-                         datos_adicionales['porcentaje_final'])
-                
-                if total != 100:
-                    QMessageBox.warning(self, "Advertencia", 
-                                       f"Los porcentajes suman {total}%. Se recomienda que sumen 100%.")
-                    reply = QMessageBox.question(self, "Continuar", 
-                                               "¿Desea continuar de todos modos?",
-                                               QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-                    if reply == QMessageBox.No:
-                        return
-            
-            # Generar el documento
-            word_path = self.word_controller.generate_word_document(
-                self.cotizacion_id,
-                self.excel_path,
-                datos_adicionales,
-                formato
-            )
-            
-            if word_path and os.path.exists(word_path):
-                QMessageBox.information(self, "Éxito", f"Documento generado correctamente en:\n{word_path}")
-                
-                # Preguntar si desea enviar por correo
-                reply = QMessageBox.question(self, "Enviar por Correo", 
-                                           "¿Desea enviar el documento por correo electrónico?",
-                                           QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
-                
-                if reply == QMessageBox.Yes:
-                    # Importar aquí para evitar importación circular
-                    from views.email_dialog import SendEmailDialog
-                    
-                    # Abrir diálogo de envío de correo
-                    email_dialog = SendEmailDialog([word_path, self.excel_path], self)
-                    email_dialog.exec_()
-                
-                self.accept()
-            else:
-                QMessageBox.critical(self, "Error", "No se pudo generar el documento Word.")
-                
+            # Si tienes un QListWidget para mostrar los archivos
+            if hasattr(self, 'files_list_widget'):
+                self.files_list_widget.clear()
+                for file_path in self.selected_files:
+                    # Mostrar solo el nombre del archivo, no la ruta completa
+                    file_name = file_path.split('/')[-1].split('\\')[-1]
+                    self.files_list_widget.addItem(f"{file_name} ({file_path})")
+
+            # Si tienes un QLabel para mostrar el contador
+            if hasattr(self, 'files_count_label'):
+                count = len(self.selected_files)
+                self.files_count_label.setText(f"Archivos seleccionados: {count}")
+
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Error al generar el documento: {str(e)}")
+            print(f"Error actualizando lista de archivos: {str(e)}")
+
+    def create_juridica_specific_tab(self):
+        """Crea la pestaña específica para persona jurídica"""
+        tab = QWidget()
+        scroll = QScrollArea()
+        scroll_widget = QWidget()
+        layout = QVBoxLayout()
+
+        info_label = QLabel("Configuración específica para Cliente Jurídico")
+        info_label.setStyleSheet("font-weight: bold; color: #1E90FF;")
+        layout.addWidget(info_label)
+
+        # Tipo de cotización jurídica
+        tipo_group = QGroupBox("Tipo de Cotización")
+        tipo_layout = QVBoxLayout()
+
+        self.cotizacion_completa_radio = QCheckBox("Cotización completa (con todos los anexos)")
+        self.cotizacion_completa_radio.setChecked(True)
+        self.cotizacion_completa_radio.toggled.connect(self.toggle_juridica_options)
+        tipo_layout.addWidget(self.cotizacion_completa_radio)
+
+        self.cotizacion_basica_radio = QCheckBox("Cotización básica (sin anexos)")
+        self.cotizacion_basica_radio.toggled.connect(self.toggle_juridica_options)
+        tipo_layout.addWidget(self.cotizacion_basica_radio)
+
+        tipo_group.setLayout(tipo_layout)
+        layout.addWidget(tipo_group)
+
+        # Secciones de la cotización completa
+        self.secciones_widget = QWidget()
+        secciones_layout = QVBoxLayout()
+
+        secciones_group = QGroupBox("Secciones a Incluir")
+        secciones_form = QVBoxLayout()
+
+        # Lista de secciones disponibles
+        self.secciones_checks = {}
+        secciones = [
+            ("portadas", "Portadas"),
+            ("contenido_separadores", "Contenido de separadores"),
+            ("carta_presentacion", "Carta de presentación"),
+            ("paginas_estandar", "Páginas estándar (pólizas, personal, director de obra)"),
+            ("cuadro_experiencia", "Cuadro de experiencia"),
+            ("certificados_trabajos", "Certificados de trabajos similares"),
+            ("seguridad_alturas", "Información de seguridad de alturas"),
+            ("programa_prevencion", "Resumen del programa de prevención y protección contra caídas"),
+            ("sgsst_certificado", "Estándares mínimos de SGSST certificado ministerio"),
+            ("presupuesto_programacion", "Presupuesto de obra y programación de obra"),
+            ("documentacion_legal", "Documentación legal y financiera"),
+            ("anexos", "Anexos")
+        ]
+
+        for key, label in secciones:
+            check = QCheckBox(label)
+            check.setChecked(True)  # Por defecto todas marcadas
+            self.secciones_checks[key] = check
+            secciones_form.addWidget(check)
+
+        secciones_group.setLayout(secciones_form)
+        secciones_layout.addWidget(secciones_group)
+
+        # Archivos a combinar
+        archivos_group = QGroupBox("Archivos Preexistentes a Combinar")
+        archivos_layout = QVBoxLayout()
+
+        archivos_buttons_layout = QHBoxLayout()
+        self.seleccionar_archivos_btn = QPushButton("Seleccionar Archivos")
+        self.seleccionar_archivos_btn.clicked.connect(self.select_files)
+        archivos_buttons_layout.addWidget(self.seleccionar_archivos_btn)
+
+        self.limpiar_archivos_btn = QPushButton("Limpiar Lista")
+        self.limpiar_archivos_btn.clicked.connect(self.clear_files)
+        archivos_buttons_layout.addWidget(self.limpiar_archivos_btn)
+
+        archivos_buttons_layout.addStretch()
+        archivos_layout.addLayout(archivos_buttons_layout)
+
+        self.archivos_list = QListWidget()
+        self.archivos_list.setMaximumHeight(100)
+        archivos_layout.addWidget(self.archivos_list)
+
+        archivos_group.setLayout(archivos_layout)
+        secciones_layout.addWidget(archivos_group)
+
+        # Configuración de pólizas
+        polizas_group = QGroupBox("Pólizas a Incluir")
+        polizas_layout = QVBoxLayout()
+
+        self.polizas_checks = {}
+        polizas = [
+            ("manejo_anticipo", "Manejo del anticipo"),
+            ("cumplimiento_contrato", "Cumplimiento del contrato"),
+            ("calidad_servicio", "Calidad del servicio"),
+            ("pago_salarios", "Pago de salarios"),
+            ("prestaciones_sociales", "Prestaciones sociales e indemnizaciones"),
+            ("responsabilidad_civil", "Seguro de responsabilidad civil extracontractual"),
+            ("calidad_funcionamiento", "Calidad y correcto funcionamiento")
+        ]
+
+        for key, label in polizas:
+            check = QCheckBox(label)
+            self.polizas_checks[key] = check
+            polizas_layout.addWidget(check)
+
+        polizas_group.setLayout(polizas_layout)
+        secciones_layout.addWidget(polizas_group)
+
+        # Información del personal técnico
+        personal_group = QGroupBox("Personal Técnico")
+        personal_form = QFormLayout()
+
+        self.director_obra_edit = QLineEdit()
+        self.director_obra_edit.setPlaceholderText("Ej: 25% de disposición en obra")
+        personal_form.addRow("Director de obra:", self.director_obra_edit)
+
+        self.residente_obra_edit = QLineEdit()
+        self.residente_obra_edit.setPlaceholderText("Nombre del residente de obra")
+        personal_form.addRow("Residente de obra:", self.residente_obra_edit)
+
+        self.tecnologo_sgsst_edit = QLineEdit()
+        self.tecnologo_sgsst_edit.setPlaceholderText("Nombre del tecnólogo SGSST")
+        personal_form.addRow("Tecnólogo SGSST:", self.tecnologo_sgsst_edit)
+
+        personal_group.setLayout(personal_form)
+        secciones_layout.addWidget(personal_group)
+
+        self.secciones_widget.setLayout(secciones_layout)
+        layout.addWidget(self.secciones_widget)
+
+        layout.addStretch()
+        scroll_widget.setLayout(layout)
+        scroll.setWidget(scroll_widget)
+        scroll.setWidgetResizable(True)
+
+        tab_layout = QVBoxLayout()
+        tab_layout.addWidget(scroll)
+        tab.setLayout(tab_layout)
+
+        self.tab_widget.addTab(tab, "Configuración Específica")
+
+    def toggle_payment_details(self):
+        """Activa/desactiva los detalles de pago por porcentajes"""
+        if self.pago_porcentajes_radio.isChecked():
+            self.pago_details_widget.setEnabled(True)
+            self.pago_contraentrega_radio.setChecked(False)
+        elif self.pago_contraentrega_radio.isChecked():
+            self.pago_details_widget.setEnabled(False)
+            self.pago_porcentajes_radio.setChecked(False)
+
+    def toggle_juridica_options(self):
+        """Activa/desactiva las opciones específicas de cotización jurídica"""
+        if self.cotizacion_completa_radio.isChecked():
+            self.secciones_widget.setEnabled(True)
+            self.cotizacion_basica_radio.setChecked(False)
+        elif self.cotizacion_basica_radio.isChecked():
+            self.secciones_widget.setEnabled(False)
+            self.cotizacion_completa_radio.setChecked(False)
+
+    def select_files(self):
+        """Selecciona archivos para combinar"""
+        files, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Seleccionar archivos para combinar",
+            "",
+            "Documentos (*.pdf *.docx *.doc);;Todos los archivos (*)"
+        )
+
+        if files:
+            self.selected_files.extend(files)
+            self.update_files_list()
+
+    def clear_files(self):
+        """Limpia la lista de archivos seleccionados"""
+        self.selected_files.clear()
+        self.update_files_list()
+
+    def update_files_list(self):
+        """Actualiza la lista visual de archivos"""
+        self.archivos_list.clear()
+        for file_path in self.selected_files:
+            self.archivos_list.addItem(os.path.basename(file_path))
+
+    def load_default_values(self):
+        """Carga valores por defecto"""
+        # Valores por defecto para operarios en letra
+        self.operarios_letra_edit.setText("dos")
+
+        # Configurar pago contraentrega por defecto
+        self.pago_contraentrega_radio.setChecked(True)
+
+        # Para jurídica, configurar cotización completa por defecto
+        if self.client_type == 'juridica':
+            self.cotizacion_completa_radio.setChecked(True)
+
+    def validate_and_accept(self):
+        """Valida los campos y acepta el diálogo"""
+        errors = []
+
+        # Validar campos obligatorios
+        if not self.referencia_edit.text().strip():
+            errors.append("La referencia del trabajo es obligatoria")
+
+        if not self.titulo_edit.text().strip():
+            errors.append("El título del trabajo es obligatorio")
+
+        if not self.lugar_edit.text().strip():
+            errors.append("El lugar de intervención es obligatorio")
+
+        if not self.concepto_edit.toPlainText().strip():
+            errors.append("El concepto general del trabajo es obligatorio")
+
+        # Validar forma de pago
+        if not self.pago_contraentrega_radio.isChecked() and not self.pago_porcentajes_radio.isChecked():
+            if not self.pago_personalizado_edit.toPlainText().strip():
+                errors.append("Debe seleccionar una forma de pago o escribir una personalizada")
+
+        # Validar porcentajes si está seleccionado pago por porcentajes
+        if self.pago_porcentajes_radio.isChecked():
+            total = self.anticipo_edit.value() + self.avance_edit.value() + self.final_edit.value()
+            if total != 100:
+                errors.append(f"Los porcentajes de pago deben sumar 100% (actual: {total}%)")
+
+        # Mostrar errores si los hay
+        if errors:
+            QMessageBox.warning(self, "Campos requeridos", "\n".join(errors))
+            return
+
+        # Si todo está bien, aceptar el diálogo
+        self.accept()
+
+    def get_config(self):
+        """Obtiene la configuración del diálogo"""
+        config = {
+            # Información básica
+            'fecha': self.fecha_edit.date().toString("dd/MM/yyyy"),
+            'referencia': self.referencia_edit.text().strip(),
+            'titulo': self.titulo_edit.text().strip(),
+            'lugar': self.lugar_edit.text().strip(),
+            'concepto': self.concepto_edit.toPlainText().strip(),
+
+            # Condiciones comerciales
+            'validez': self.validez_edit.value(),
+            'cuadrillas': self.cuadrillas_edit.value(),
+            'operarios_num': self.operarios_num_edit.value(),
+            'operarios_letra': self.operarios_letra_edit.text().strip() or "dos",
+            'plazo_dias': self.plazo_dias_edit.value(),
+            'plazo_tipo': self.plazo_tipo_combo.currentText(),
+
+            # Forma de pago
+            'pago_contraentrega': self.pago_contraentrega_radio.isChecked(),
+            'pago_porcentajes': self.pago_porcentajes_radio.isChecked(),
+            'anticipo': self.anticipo_edit.value(),
+            'avance': self.avance_edit.value(),
+            'avance_requerido': self.avance_requerido_edit.value(),
+            'final': self.final_edit.value(),
+            'pago_personalizado': self.pago_personalizado_edit.toPlainText().strip(),
+
+            # Archivos seleccionados
+            'archivos_combinar': self.selected_files.copy(),
+
+            # Configuración específica del tipo de cliente
+            'client_type': self.client_type
+        }
+
+        # Configuración específica para persona natural
+        if self.client_type == 'natural':
+            config.update({
+                'formato_simple': self.formato_simple_check.isChecked(),
+                'incluir_iva': self.incluir_iva_check.isChecked(),
+                'incluir_materiales': self.incluir_materiales_check.isChecked()
+            })
+
+        # Configuración específica para persona jurídica
+        elif self.client_type == 'juridica':
+            config.update({
+                'cotizacion_completa': self.cotizacion_completa_radio.isChecked(),
+                'cotizacion_basica': self.cotizacion_basica_radio.isChecked(),
+                'secciones_incluir': {key: check.isChecked() for key, check in self.secciones_checks.items()},
+                'polizas_incluir': {key: check.isChecked() for key, check in self.polizas_checks.items()},
+                'director_obra': self.director_obra_edit.text().strip(),
+                'residente_obra': self.residente_obra_edit.text().strip(),
+                'tecnologo_sgsst': self.tecnologo_sgsst_edit.text().strip()
+            })
+
+        return config
+
+
+# Ejemplo de uso
+if __name__ == '__main__':
+    from PyQt5.QtWidgets import QApplication
+
+    app = QApplication(sys.argv)
+
+    # Probar con cliente jurídico
+    dialog = ImprovedWordConfigDialog(client_type='juridica')
+    if dialog.exec_():
+        config = dialog.get_config()
+        print("Configuración obtenida:")
+        for key, value in config.items():
+            print(f"  {key}: {value}")
+
+    sys.exit(app.exec_())
+

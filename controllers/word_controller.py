@@ -134,54 +134,54 @@ class WordController:
     def _create_juridica_corta_template(self):
         """Crea la plantilla corta para empresas jurídicas"""
         doc = Document()
-        
+
         # Título
         title = doc.add_heading('COTIZACIÓN DE SERVICIOS', 0)
         title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        
+
         # Fecha e información básica
         p = doc.add_paragraph()
         p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
         p.add_run('Fecha: ').bold = True
         p.add_run('{{fecha}}')
-        
+
         # Información del cliente (resumida)
         p = doc.add_paragraph()
         p.add_run('Cliente: ').bold = True
         p.add_run('{{cliente}} - NIT: {{nit}}')
-        
+
         # Referencia
         p = doc.add_paragraph()
         p.add_run('Referencia: ').bold = True
         p.add_run('{{referencia}}')
-        
+
         # Tabla de cotización
         doc.add_heading('DETALLE DE COTIZACIÓN', level=1)
         doc.add_paragraph('{{tabla_cotizacion}}')
-        
+
         # Condiciones resumidas
         doc.add_heading('CONDICIONES', level=1)
-        
+
         # Lista de condiciones
         p = doc.add_paragraph('• Validez: ')
         p.add_run('{{validez}} días')
-        
+
         p = doc.add_paragraph('• Personal: ')
         p.add_run('{{cuadrillas}} cuadrilla(s) - {{operarios}} operario(s)')
-        
+
         p = doc.add_paragraph('• Plazo: ')
         p.add_run('{{plazo}} días hábiles')
-        
+
         p = doc.add_paragraph('• Forma de Pago: ')
         p.add_run('{{forma_pago}}')
-        
+
         # Firma
         doc.add_paragraph('\n')
         p = doc.add_paragraph('_______________________________')
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         p = doc.add_paragraph('Firma y Sello')
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        
+
         # Guardar plantilla
         doc.save(self.template_juridica_corta)
     
@@ -492,6 +492,284 @@ class WordController:
             print(f"Error al generar el documento Word: {e}")
             raise
     
+    def generate_natural_cotizacion(self, config, excel_path):
+        """Genera una cotización para una persona natural."""
+        doc = Document()
+
+        # Estilos (opcional, pero recomendado para consistencia)
+        # ... (puedes definir estilos aquí)
+
+        # --- Contenido del documento ---
+        doc.add_heading(config["titulo"], level=1)
+
+        p = doc.add_paragraph()
+        p.add_run("Fecha: ").bold = True
+        p.add_run(config["fecha"])
+
+        p = doc.add_paragraph()
+        p.add_run("Lugar de intervención: ").bold = True
+        p.add_run(config["lugar"])
+
+        doc.add_heading("1. Concepto General del Trabajo", level=2)
+        doc.add_paragraph(config["concepto"])
+
+        doc.add_heading("2. Condiciones Comerciales", level=2)
+
+        p = doc.add_paragraph()
+        p.add_run("Validez de la oferta: ").bold = True
+        p.add_run(f"{config["validez"]} días")
+
+        p = doc.add_paragraph()
+        p.add_run("Personal de obra: ").bold = True
+        p.add_run(f"{config["cuadrillas"]} cuadrilla(s) con {config["operarios_num"]} ({config["operarios_letra"]}) operarios.")
+
+        p = doc.add_paragraph()
+        p.add_run("Plazo de ejecución: ").bold = True
+        p.add_run(f"{config["plazo_dias"]} días {config["plazo_tipo"]}")
+
+        p = doc.add_paragraph()
+        p.add_run("Forma de pago: ").bold = True
+        if config["pago_personalizado"]:
+            p.add_run(config["pago_personalizado"])
+        elif config["pago_contraentrega"]:
+            p.add_run("Contraentrega")
+        elif config["pago_porcentajes"]:
+            pago_str = f"{config["anticipo"]}% de anticipo, {config["avance"]}% al {config["avance_requerido"]}% de avance y {config["final"]}% al finalizar."
+            p.add_run(pago_str)
+
+        doc.add_heading("3. Detalle de la Cotización", level=2)
+        # Aquí puedes insertar la tabla de Excel como imagen
+        if excel_path and os.path.exists(excel_path):
+            try:
+                table_image_path = self._capture_excel_table(excel_path)
+                if table_image_path:
+                    doc.add_picture(table_image_path, width=Inches(6.0))
+                    os.remove(table_image_path) # Limpiar imagen temporal
+            except Exception as e:
+                print(f"Error al insertar la tabla de Excel: {e}")
+                doc.add_paragraph("[Error al generar la tabla de cotización]")
+        else:
+            doc.add_paragraph("[No se encontró el archivo de cotización en Excel]")
+
+        doc.add_heading("4. Notas Adicionales", level=2)
+        if config["incluir_iva"]:
+            doc.add_paragraph("Los precios presentados en esta cotización incluyen IVA.")
+        if config["incluir_materiales"]:
+            doc.add_paragraph("Los materiales a utilizar serán de primera calidad y cumplirán con las normas técnicas vigentes.")
+
+        # --- Guardar el documento ---
+        output_dir = os.path.join(os.getcwd(), "output")
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+        filename = f"Cotizacion_Natural_{config["lugar"].replace(" ", "_")}_{datetime.now().strftime("%Y%m%d")}.docx"
+        output_path = os.path.join(output_dir, filename)
+
+        doc.save(output_path)
+        return output_path
+
+    def generate_juridica_cotizacion(self, config, excel_path):
+        """Genera una cotización para una persona jurídica."""
+        doc = Document()
+
+        # --- Contenido del documento ---
+        # 1. Portadas (si se seleccionan)
+        if config["secciones_incluir"].get("portadas"):
+            self._add_portadas(doc, config)
+
+        # 2. Contenido de Separadores (si se seleccionan)
+        if config["secciones_incluir"].get("contenido_separadores"):
+            self._add_contenido_separadores(doc, config)
+
+        # 3. Carta de Presentación (si se selecciona)
+        if config["secciones_incluir"].get("carta_presentacion"):
+            self._add_carta_presentacion(doc, config)
+
+        # 4. Páginas Estándar (Pólizas, Personal, Director de Obra) (si se seleccionan)
+        if config["secciones_incluir"].get("paginas_estandar"):
+            self._add_paginas_estandar(doc, config)
+
+        # 5. Cuadro de Experiencia (si se selecciona)
+        if config["secciones_incluir"].get("cuadro_experiencia"):
+            self._add_cuadro_experiencia(doc, config)
+
+        # 6. Certificados de Trabajos Similares (si se selecciona)
+        if config["secciones_incluir"].get("certificados_trabajos"):
+            self._add_certificados_trabajos(doc, config)
+
+        # 7. Información de Seguridad de Alturas (si se selecciona)
+        if config["secciones_incluir"].get("seguridad_alturas"):
+            self._add_seguridad_alturas(doc, config)
+
+        # 8. Resumen del Programa de Prevención y Protección contra Caídas en Alturas (si se selecciona)
+        if config["secciones_incluir"].get("programa_prevencion"):
+            self._add_programa_prevencion(doc, config)
+
+        # 9. Estándares Mínimos de SGSST Certificado Ministerio (si se selecciona)
+        if config["secciones_incluir"].get("sgsst_certificado"):
+            self._add_sgsst_certificado(doc, config)
+
+        # 10. Presupuesto de Obra y Programación de Obra (si se selecciona)
+        if config["secciones_incluir"].get("presupuesto_programacion"):
+            self._add_presupuesto_programacion(doc, config, excel_path)
+
+        # 11. Documentación Legal y Financiera (si se selecciona)
+        if config["secciones_incluir"].get("documentacion_legal"):
+            self._add_documentacion_legal(doc, config)
+
+        # 12. Anexos (si se seleccionan)
+        if config["secciones_incluir"].get("anexos"):
+            self._add_anexos(doc, config)
+
+        # --- Combinar archivos preexistentes ---
+        if config["archivos_combinar"]:
+            self._combine_external_files(doc, config["archivos_combinar"])
+
+        # --- Guardar el documento ---
+        output_dir = os.path.join(os.getcwd(), "output")
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+        filename = f"Cotizacion_Juridica_{config["lugar"].replace(" ", "_")}_{datetime.now().strftime("%Y%m%d")}.docx"
+        output_path = os.path.join(output_dir, filename)
+
+        doc.save(output_path)
+        return output_path
+
+    def _add_portadas(self, doc, config):
+        doc.add_page_break()
+        doc.add_heading("PORTADA DE LA COTIZACIÓN", level=0).alignment = WD_ALIGN_PARAGRAPH.CENTER
+        doc.add_paragraph(f"\n\n\nProyecto: {config["titulo"]}").alignment = WD_ALIGN_PARAGRAPH.CENTER
+        doc.add_paragraph(f"Lugar: {config["lugar"]}").alignment = WD_ALIGN_PARAGRAPH.CENTER
+        doc.add_paragraph(f"Fecha: {config["fecha"]}").alignment = WD_ALIGN_PARAGRAPH.CENTER
+        doc.add_page_break()
+
+    def _add_contenido_separadores(self, doc, config):
+        doc.add_page_break()
+        doc.add_heading("CONTENIDO DE SEPARADORES", level=1).alignment = WD_ALIGN_PARAGRAPH.CENTER
+        doc.add_paragraph("Aquí iría el contenido de los separadores. La paginación se manejará al final.")
+        doc.add_page_break()
+
+    def _add_carta_presentacion(self, doc, config):
+        doc.add_page_break()
+        doc.add_heading("CARTA DE PRESENTACIÓN", level=1).alignment = WD_ALIGN_PARAGRAPH.CENTER
+        doc.add_paragraph(f"Bogotá D.C., {config["fecha"]}")
+        doc.add_paragraph("\nSeñores")
+        doc.add_paragraph(config["lugar"])
+        doc.add_paragraph("Ciudad")
+        doc.add_paragraph("\nAsunto: Presentación de Propuesta para " + config["titulo"])
+        doc.add_paragraph("\nCordial Saludo,")
+        doc.add_paragraph("Por medio de la presente, nos permitimos presentar a su consideración la propuesta para la ejecución de los trabajos de " + config["concepto"] + ", en las instalaciones de " + config["lugar"] + ", de acuerdo a los requerimientos solicitados.")
+        doc.add_paragraph("\nEsperamos que la presente propuesta sea de su agrado y quedamos a su disposición para cualquier aclaración.")
+        doc.add_paragraph("\nAtentamente,")
+        doc.add_paragraph("\n_______________________________")
+        doc.add_paragraph("Firma y Sello de la Empresa")
+        doc.add_page_break()
+
+    def _add_paginas_estandar(self, doc, config):
+        doc.add_page_break()
+        doc.add_heading("PÁGINAS ESTÁNDAR", level=1).alignment = WD_ALIGN_PARAGRAPH.CENTER
+        doc.add_paragraph("Aquí se incluirían las páginas estándar con información de pólizas, personal y director de obra.")
+
+        doc.add_heading("Pólizas", level=2)
+        for poliza_key, checked in config["polizas_incluir"].items():
+            if checked:
+                doc.add_paragraph(f"- {poliza_key.replace("_", " ").title()}: [Texto de la póliza correspondiente]")
+
+        doc.add_heading("Personal de Obra", level=2)
+        doc.add_paragraph(f"Cantidad de Personal de Obra: {config["cuadrillas"]} cuadrilla(s) con {config["operarios_num"]} ({config["operarios_letra"]}) operarios.")
+
+        doc.add_heading("Personal Técnico", level=2)
+        if config["director_obra"]:
+            doc.add_paragraph(f"Director de Obra: {config["director_obra"]}")
+        if config["residente_obra"]:
+            doc.add_paragraph(f"Residente de Obra: {config["residente_obra"]}")
+        if config["tecnologo_sgsst"]:
+            doc.add_paragraph(f"Tecnólogo SGSST: {config["tecnologo_sgsst"]}")
+        doc.add_page_break()
+
+    def _add_cuadro_experiencia(self, doc, config):
+        doc.add_page_break()
+        doc.add_heading("CUADRO DE EXPERIENCIA", level=1).alignment = WD_ALIGN_PARAGRAPH.CENTER
+        doc.add_paragraph("Aquí se insertaría el cuadro de experiencia con material fotográfico.")
+        doc.add_page_break()
+
+    def _add_certificados_trabajos(self, doc, config):
+        doc.add_page_break()
+        doc.add_heading("CERTIFICADOS DE TRABAJOS SIMILARES", level=1).alignment = WD_ALIGN_PARAGRAPH.CENTER
+        doc.add_paragraph("Aquí se adjuntarían los certificados de trabajos similares.")
+        doc.add_page_break()
+
+    def _add_seguridad_alturas(self, doc, config):
+        doc.add_page_break()
+        doc.add_heading("INFORMACIÓN DE SEGURIDAD DE ALTURAS", level=1).alignment = WD_ALIGN_PARAGRAPH.CENTER
+        doc.add_paragraph("Aquí se incluiría la información de seguridad de alturas.")
+        doc.add_page_break()
+
+    def _add_programa_prevencion(self, doc, config):
+        doc.add_page_break()
+        doc.add_heading("RESUMEN DEL PROGRAMA DE PREVENCIÓN Y PROTECCIÓN CONTRA CAÍDAS EN ALTURAS", level=1).alignment = WD_ALIGN_PARAGRAPH.CENTER
+        doc.add_paragraph("Aquí se incluiría el resumen del programa de prevención y protección contra caídas en alturas.")
+        doc.add_page_break()
+
+    def _add_sgsst_certificado(self, doc, config):
+        doc.add_page_break()
+        doc.add_heading("ESTÁNDARES MÍNIMOS DE SGSST CERTIFICADO MINISTERIO", level=1).alignment = WD_ALIGN_PARAGRAPH.CENTER
+        doc.add_paragraph("Aquí se incluirían los estándares mínimos de SGSST certificado por el ministerio.")
+        doc.add_page_break()
+
+    def _add_presupuesto_programacion(self, doc, config, excel_path):
+        doc.add_page_break()
+        doc.add_heading("PRESUPUESTO DE OBRA Y PROGRAMACIÓN DE OBRA", level=1).alignment = WD_ALIGN_PARAGRAPH.CENTER
+        doc.add_paragraph("Aquí se insertaría el presupuesto de obra y la programación de obra.")
+        # Reutilizar la lógica de la tabla de Excel
+        if excel_path and os.path.exists(excel_path):
+            try:
+                table_image_path = self._capture_excel_table(excel_path)
+                if table_image_path:
+                    doc.add_picture(table_image_path, width=Inches(6.0))
+                    os.remove(table_image_path) # Limpiar imagen temporal
+            except Exception as e:
+                print(f"Error al insertar la tabla de Excel en cotización jurídica: {e}")
+                doc.add_paragraph("[Error al generar la tabla de cotización]")
+        else:
+            doc.add_paragraph("[No se encontró el archivo de cotización en Excel]")
+        doc.add_page_break()
+
+    def _add_documentacion_legal(self, doc, config):
+        doc.add_page_break()
+        doc.add_heading("DOCUMENTACIÓN LEGAL Y FINANCIERA", level=1).alignment = WD_ALIGN_PARAGRAPH.CENTER
+        doc.add_paragraph("Aquí se incluiría la documentación legal y financiera.")
+        doc.add_page_break()
+
+    def _add_anexos(self, doc, config):
+        doc.add_page_break()
+        doc.add_heading("ANEXOS", level=1).alignment = WD_ALIGN_PARAGRAPH.CENTER
+        doc.add_paragraph("Aquí se incluirían los anexos.")
+        doc.add_page_break()
+
+    def _combine_external_files(self, main_doc, file_paths):
+        """Combina archivos externos (DOCX y PDF) en el documento principal."""
+        for file_path in file_paths:
+            if file_path.lower().endswith(".docx"):
+                try:
+                    sub_doc = Document(file_path)
+                    for element in sub_doc.element.body:
+                        main_doc.element.body.append(element)
+                    main_doc.add_page_break() # Añadir salto de página entre documentos
+                except Exception as e:
+                    print(f"Error al combinar DOCX {file_path}: {e}")
+                    main_doc.add_paragraph(f"[Error al insertar archivo DOCX: {os.path.basename(file_path)}]")
+            elif file_path.lower().endswith(".pdf"):
+                # Para PDF, se necesitaría una librería externa como PyPDF2 para leer y luego convertir a imagen o texto
+                # Esto es más complejo y requeriría un renderizado o extracción de texto.
+                # Por ahora, solo se añade una nota.
+                main_doc.add_paragraph(f"[Archivo PDF '{os.path.basename(file_path)}' no se puede insertar directamente. Se requiere procesamiento adicional.]")
+                main_doc.add_page_break()
+            else:
+                main_doc.add_paragraph(f"[Tipo de archivo no soportado para combinación: {os.path.basename(file_path)}]")
+                main_doc.add_page_break()
+
     def _replace_text_in_paragraph(self, paragraph, marker, text):
         """
         Reemplaza un marcador en un párrafo manteniendo el formato.
@@ -506,3 +784,5 @@ class WordController:
             for run in paragraph.runs:
                 if marker in run.text:
                     run.text = run.text.replace(marker, text)
+
+

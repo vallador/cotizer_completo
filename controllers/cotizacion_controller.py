@@ -56,6 +56,7 @@ class CotizacionController:
     def add_activity(self, activity_data):
         """Agrega una actividad a la base de datos"""
         return self.database_manager.add_activity(**activity_data)
+        return self.database_manager.add_activity(**activity_data)
 
 
 

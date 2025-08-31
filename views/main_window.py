@@ -8,7 +8,7 @@ from datetime import datetime
 from controllers.word_controller import WordController
 from views.data_management_window import DataManagementWindow
 from views.email_dialog import SendEmailDialog
-from views.word_dialog import WordConfigDialog
+from views.word_dialog import ImprovedWordConfigDialog
 from views.cotizacion_file_dialog import CotizacionFileDialog
 
 class EditableTableWidgetItem(QTableWidgetItem):
@@ -164,9 +164,7 @@ class MainWindow(QMainWindow):
     def __init__(self, cotizacion_controller, excel_controller):
         super().__init__()
 
-        ### -----------------------------------------------------------------------------------------
-        ### 1. INICIALIZACIÓN DE CONTROLADORES Y CONFIGURACIÓN DE LA VENTANA
-        ### -----------------------------------------------------------------------------------------
+
         self.cotizacion_controller = cotizacion_controller
         self.excel_controller = excel_controller
         self.aiu_manager = self.cotizacion_controller.aiu_manager
@@ -174,17 +172,11 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Sistema de Cotizaciones")
         self.setGeometry(100, 100, 1300, 850)
 
-        ### -----------------------------------------------------------------------------------------
-        ### 2. CREACIÓN DE WIDGETS Y LAYOUTS PRINCIPALES
-        ### Se crea un widget central y un layout vertical que contendrá todo.
-        ### -----------------------------------------------------------------------------------------
+
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
 
-        ### -----------------------------------------------------------------------------------------
-        ### 3. SECCIÓN SUPERIOR: INFORMACIÓN DEL CLIENTE
-        ### -----------------------------------------------------------------------------------------
         client_group = QGroupBox("Información del Cliente")
         client_main_layout = QVBoxLayout(client_group)
 
@@ -202,7 +194,7 @@ class MainWindow(QMainWindow):
 
         client_form_layout = QGridLayout()
         self.tipo_combo = QComboBox();
-        self.tipo_combo.addItems(["Natural", "Jurídica"])
+        self.tipo_combo.addItems(["Natural", "Juridica"])
         self.nit_input = QLineEdit()
         self.nombre_input = QLineEdit()
         self.telefono_input = QLineEdit()
@@ -502,22 +494,60 @@ class MainWindow(QMainWindow):
     def generate_excel(self, show_message=True):
         """Prepara los datos y llama al controlador de Excel."""
         structured_items = []
-        for row in range(self.activities_table.rowCount()):
-            first_item = self.activities_table.item(row, 0)
-            if not first_item or not first_item.data(Qt.UserRole):
-                continue
 
-            metadata = first_item.data(Qt.UserRole)
-            if metadata['type'] == 'chapter':
-                structured_items.append({'type': 'chapter', 'name': first_item.text()})
-            elif metadata['type'] == 'activity':
-                structured_items.append({
-                    'type': 'activity',
-                    'descripcion': first_item.text(),
-                    'cantidad': float(self.activities_table.item(row, 1).text()),
-                    'unidad': self.activities_table.item(row, 2).text(),
-                    'valor_unitario': float(self.activities_table.item(row, 3).text()),
-                })
+        # Priorizar datos de cotización importada si están disponibles
+        if hasattr(self, 'selected_cotizacion') and self.selected_cotizacion:
+            print("Usando datos de cotización importada")  # Debug
+            cotizacion = self.selected_cotizacion
+
+            # Usar table_rows si existe, sino usar actividades (compatibilidad)
+            if 'table_rows' in cotizacion:
+                for row_data in cotizacion['table_rows']:
+                    if row_data['type'] == 'chapter_header':
+                        structured_items.append({
+                            'type': 'chapter',
+                            'name': row_data['descripcion']
+                        })
+                    elif row_data['type'] == 'activity':
+                        structured_items.append({
+                            'type': 'activity',
+                            'descripcion': row_data['descripcion'],
+                            'cantidad': float(row_data.get('cantidad', 0)),
+                            'unidad': row_data.get('unidad', ''),
+                            'valor_unitario': float(row_data.get('valor_unitario', 0)),
+                        })
+            elif 'actividades' in cotizacion:
+                # Formato anterior por compatibilidad
+                for activity in cotizacion['actividades']:
+                    structured_items.append({
+                        'type': 'activity',
+                        'descripcion': activity.get('descripcion', ''),
+                        'cantidad': float(activity.get('cantidad', 0)),
+                        'unidad': activity.get('unidad', ''),
+                        'valor_unitario': float(activity.get('valor_unitario', 0)),
+                    })
+        else:
+            # Usar datos de la tabla de la interfaz (comportamiento original)
+            print("Usando datos de la tabla de interfaz")  # Debug
+            for row in range(self.activities_table.rowCount()):
+                first_item = self.activities_table.item(row, 0)
+                if not first_item or not first_item.data(Qt.UserRole):
+                    continue
+
+                metadata = first_item.data(Qt.UserRole)
+                if metadata['type'] == 'chapter':
+                    structured_items.append({'type': 'chapter', 'name': first_item.text()})
+                elif metadata['type'] == 'activity':
+                    structured_items.append({
+                        'type': 'activity',
+                        'descripcion': first_item.text(),
+                        'cantidad': float(self.activities_table.item(row, 1).text()),
+                        'unidad': self.activities_table.item(row, 2).text(),
+                        'valor_unitario': float(self.activities_table.item(row, 3).text()),
+                    })
+
+        print(f"Total de items estructurados: {len(structured_items)}")  # Debug
+        print(f"Actividades encontradas: {sum(1 for item in structured_items if item['type'] == 'activity')}")  # Debug
 
         if not any(item['type'] == 'activity' for item in structured_items):
             QMessageBox.warning(self, "Vacío", "No hay actividades en la cotización para generar el Excel.")
@@ -530,7 +560,7 @@ class MainWindow(QMainWindow):
         try:
             excel_path = self.excel_controller.generate_excel(
                 items=structured_items,
-                activities=structured_items,  # <-- Tal vez querías pasar structured_items aquí
+                activities=structured_items,
                 tipo_persona=self.tipo_combo.currentText().lower(),
                 administracion=aiu_values['administracion'],
                 imprevistos=aiu_values['imprevistos'],
@@ -541,10 +571,12 @@ class MainWindow(QMainWindow):
                 QMessageBox.information(self, "Éxito", f"Archivo Excel generado en:\n{excel_path}")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"No se pudo generar el Excel: {e}")
+            print(f"Error detallado: {e}")  # Debug
+            import traceback
+            traceback.print_exc()  # Debug
             return
 
         return excel_path
-
     def generate_word(self):
         """Genera un documento Word con la cotización actual"""
         try:
@@ -563,29 +595,169 @@ class MainWindow(QMainWindow):
             if not excel_path:
                 return
 
-            # Obtener datos del cliente
-            client_id = self.client_combo.currentData()
-            client = self.cotizacion_controller.database_manager.get_client_by_id(client_id)
+            # Obtener datos del cliente directamente de los campos de la interfaz
+            client_type = self.tipo_combo.currentText().lower()
+            client_data = {
+                'tipo': client_type,
+                'nombre': self.nombre_input.text(),
+                'nit': self.nit_input.text(),
+                'direccion': self.direccion_input.text(),
+                'telefono': self.telefono_input.text(),
+                'email': self.email_input.text()
+            }
 
-            # Abrir diálogo para configurar documento Word
-            dialog = WordConfigDialog(self, client['tipo'])
+            # Crear datos precargados para el diálogo
+            precarga_data = {
+                'referencia': f"Cotización para {client_data['nombre']}",
+                'titulo': f"COTIZACIÓN DE SERVICIOS PARA {client_data['nombre'].upper()}",
+                'lugar': client_data['direccion'],
+                'concepto': "Servicios especializados según especificaciones técnicas."
+            }
+
+            # Abrir diálogo para configurar documento Word con datos precargados
+            dialog = ImprovedWordConfigDialog(
+                self,
+                client_type=client_type,
+                client_data=client_data,
+                precarga_data=precarga_data
+            )
+
             if dialog.exec_():
                 config = dialog.get_config()
 
                 # Crear controlador de Word
-                word_controller = WordController()
+                word_controller = WordController(self.cotizacion_controller)
 
-                # Generar Word
-                word_path = word_controller.generate_word(
-                    excel_path=excel_path,
-                    client_data=client,
-                    config=config
-                )
+                # Generar Word según el tipo de cliente
+                if config["client_type"] == "natural":
+                    word_path = word_controller.generate_natural_cotizacion(config, excel_path)
+                elif config["client_type"] == "juridica":
+                    word_path = word_controller.generate_juridica_cotizacion(config, excel_path)
+                else:
+                    QMessageBox.warning(self, "Error", "Tipo de cliente no reconocido en la configuración del diálogo.")
+                    return
 
                 QMessageBox.information(self, "Éxito", f"Documento Word generado correctamente en:\n{word_path}")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error al generar el Word: {str(e)}")
 
+    def load_imported_cotizacion_to_ui(self, cotizacion_data):
+        """
+        Carga los datos de una cotización importada en la interfaz de usuario
+
+        Args:
+            cotizacion_data (dict): Datos de la cotización importada
+        """
+        try:
+            # Limpiar tabla actual
+            self.activities_table.setRowCount(0)
+
+            # Cargar información del cliente si existe
+            if 'cliente' in cotizacion_data and cotizacion_data['cliente']:
+                cliente = cotizacion_data['cliente']
+                # Aquí puedes actualizar los campos del cliente en tu interfaz
+                # Por ejemplo, si tienes campos como self.client_name, self.client_nit, etc.
+
+            # Cargar actividades en la tabla
+            if 'table_rows' in cotizacion_data:
+                for row_data in cotizacion_data['table_rows']:
+                    self.add_imported_row_to_table(row_data)
+            elif 'actividades' in cotizacion_data:
+                # Formato anterior por compatibilidad
+                for activity in cotizacion_data['actividades']:
+                    self.add_imported_activity_to_table(activity)
+
+            # Actualizar totales y otros cálculos
+            self.calculate_totals()
+
+            print("Datos cargados en la interfaz correctamente")
+
+        except Exception as e:
+            print(f"Error cargando datos en la interfaz: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def add_imported_row_to_table(self, row_data):
+        """
+        Añade una fila importada a la tabla de actividades
+
+        Args:
+            row_data (dict): Datos de la fila (chapter_header o activity)
+        """
+        row_position = self.activities_table.rowCount()
+        self.activities_table.insertRow(row_position)
+
+        if row_data['type'] == 'chapter_header':
+            # Crear ítem de capítulo
+            item = QTableWidgetItem(row_data['descripcion'])
+            item.setData(Qt.UserRole, {'type': 'chapter'})
+            item.setBackground(QColor(200, 200, 200))  # Color de fondo para capítulos
+            self.activities_table.setItem(row_position, 0, item)
+
+            # Llenar celdas vacías para el capítulo
+            for col in range(1, self.activities_table.columnCount()):
+                empty_item = QTableWidgetItem("")
+                empty_item.setBackground(QColor(200, 200, 200))
+                self.activities_table.setItem(row_position, col, empty_item)
+
+        elif row_data['type'] == 'activity':
+            # Crear ítem de actividad
+            desc_item = QTableWidgetItem(row_data['descripcion'])
+            desc_item.setData(Qt.UserRole, {'type': 'activity'})
+            self.activities_table.setItem(row_position, 0, desc_item)
+
+            # Cantidad
+            self.activities_table.setItem(row_position, 1,
+                                          QTableWidgetItem(str(row_data.get('cantidad', 0))))
+
+            # Unidad
+            self.activities_table.setItem(row_position, 2,
+                                          QTableWidgetItem(row_data.get('unidad', '')))
+
+            # Valor unitario
+            self.activities_table.setItem(row_position, 3,
+                                          QTableWidgetItem(str(row_data.get('valor_unitario', 0))))
+
+            # Total (calculado)
+            cantidad = float(row_data.get('cantidad', 0))
+            valor_unitario = float(row_data.get('valor_unitario', 0))
+            total = cantidad * valor_unitario
+            self.activities_table.setItem(row_position, 4,
+                                          QTableWidgetItem(str(total)))
+
+    def add_imported_activity_to_table(self, activity_data):
+        """
+        Añade una actividad importada (formato anterior) a la tabla
+
+        Args:
+            activity_data (dict): Datos de la actividad
+        """
+        row_position = self.activities_table.rowCount()
+        self.activities_table.insertRow(row_position)
+
+        # Descripción
+        desc_item = QTableWidgetItem(activity_data.get('descripcion', ''))
+        desc_item.setData(Qt.UserRole, {'type': 'activity'})
+        self.activities_table.setItem(row_position, 0, desc_item)
+
+        # Cantidad
+        self.activities_table.setItem(row_position, 1,
+                                      QTableWidgetItem(str(activity_data.get('cantidad', 0))))
+
+        # Unidad
+        self.activities_table.setItem(row_position, 2,
+                                      QTableWidgetItem(activity_data.get('unidad', '')))
+
+        # Valor unitario
+        self.activities_table.setItem(row_position, 3,
+                                      QTableWidgetItem(str(activity_data.get('valor_unitario', 0))))
+
+        # Total
+        cantidad = float(activity_data.get('cantidad', 0))
+        valor_unitario = float(activity_data.get('valor_unitario', 0))
+        total = cantidad * valor_unitario
+        self.activities_table.setItem(row_position, 4,
+                                      QTableWidgetItem(str(total)))
     def clear_form(self):
         """Limpia el formulario"""
         try:
@@ -613,34 +785,217 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", f"Error al limpiar formulario: {str(e)}")
 
     def save_as_file(self):
-        """Guarda la cotización actual como un archivo"""
+        """Guarda la cotización actual como un archivo incluyendo encabezados de capítulo"""
         try:
-            # Verificar que haya actividades
+            # ✅ VALIDACIÓN 1: Verificar que haya filas en la tabla
             if self.activities_table.rowCount() == 0:
-                QMessageBox.warning(self, "Error", "Debe agregar al menos una actividad a la cotización.")
+                QMessageBox.warning(
+                    self,
+                    "Sin Actividades",
+                    "Debe agregar al menos una actividad a la cotización antes de guardar.\n\n"
+                    "Para agregar actividades:\n"
+                    "• Use el botón 'Agregar Actividad'\n"
+                    "• O inserte encabezados de capítulo si es necesario"
+                )
                 return
 
-            # Verificar que haya un cliente seleccionado
-            if self.client_combo.currentIndex() == -1:
-                QMessageBox.warning(self, "Error", "Debe seleccionar un cliente.")
+            # ✅ VALIDACIÓN 2: Verificar que haya un cliente seleccionado
+            if self.client_combo.currentIndex() == -1 or self.client_combo.currentData() is None:
+                reply = QMessageBox.warning(
+                    self,
+                    "Cliente Requerido",
+                    "Debe seleccionar un cliente antes de guardar la cotización.\n\n"
+                    "¿Desea seleccionar un cliente ahora?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes
+                )
+
+                if reply == QMessageBox.Yes:
+                    # Enfocar el combo de clientes para que el usuario seleccione
+                    self.client_combo.setFocus()
+                    self.client_combo.showPopup()
                 return
 
-            # Obtener datos del cliente
+            # ✅ VALIDACIÓN 3: Verificar que el cliente seleccionado sea válido
             client_id = self.client_combo.currentData()
-            client_data = self.cotizacion_controller.database_manager.get_client_by_id(client_id)
+            if client_id is None:
+                QMessageBox.critical(
+                    self,
+                    "Error de Cliente",
+                    "El cliente seleccionado no es válido.\n\n"
+                    "Por favor:\n"
+                    "• Seleccione un cliente diferente de la lista\n"
+                    "• O actualice la lista de clientes"
+                )
+                return
 
-            # Obtener actividades de la tabla
+            # ✅ VALIDACIÓN 4: Verificar que se pueden obtener los datos del cliente
+            try:
+                client_data = self.cotizacion_controller.database_manager.get_client_by_id(client_id)
+                if not client_data:
+                    QMessageBox.critical(
+                        self,
+                        "Cliente No Encontrado",
+                        f"No se encontraron los datos del cliente seleccionado (ID: {client_id}).\n\n"
+                        "Esto puede suceder si:\n"
+                        "• El cliente fue eliminado de la base de datos\n"
+                        "• Hay un problema con la conexión a la base de datos\n\n"
+                        "Por favor seleccione un cliente diferente."
+                    )
+                    return
+            except Exception as e:
+                QMessageBox.critical(
+                    self,
+                    "Error de Base de Datos",
+                    f"Error al obtener los datos del cliente:\n{str(e)}\n\n"
+                    "Verifique la conexión a la base de datos e intente nuevamente."
+                )
+                return
+
+            # ✅ VALIDACIÓN 5: Verificar que haya actividades reales (no solo encabezados)
             activities = []
+            activity_id = 1
+
             for row in range(self.activities_table.rowCount()):
-                activity = {
-                    'descripcion': self.activities_table.item(row, 0).text(),
-                    'cantidad': float(self.activities_table.item(row, 1).text()),
-                    'unidad': self.activities_table.item(row, 2).text(),
-                    'valor_unitario': float(self.activities_table.item(row, 3).text()),
-                    'total': float(self.activities_table.item(row, 4).text()),
-                    'id': row + 1  # Asignar un ID único basado en el índice
-                }
-                activities.append(activity)
+                # Obtener los elementos de la fila
+                desc_item = self.activities_table.item(row, 0)
+                cant_item = self.activities_table.item(row, 1)
+                unid_item = self.activities_table.item(row, 2)
+                valor_item = self.activities_table.item(row, 3)
+                total_item = self.activities_table.item(row, 4)
+
+                # Verificar si es un encabezado de capítulo
+                is_chapter_header = False
+
+                # Método 1: Verificar si tiene el atributo personalizado
+                if desc_item and hasattr(desc_item, 'is_chapter_header'):
+                    is_chapter_header = desc_item.is_chapter_header
+
+                # Método 2: Verificar por patrón de datos si no tiene el atributo
+                if not is_chapter_header:
+                    try:
+                        cant_text = cant_item.text().strip() if cant_item else ""
+                        valor_text = valor_item.text().strip() if valor_item else ""
+                        total_text = total_item.text().strip() if total_item else ""
+
+                        if not cant_text and not valor_text and not total_text:
+                            is_chapter_header = True
+                        else:
+                            cantidad = float(cant_text) if cant_text else 0.0
+                            valor_unitario = float(valor_text) if valor_text else 0.0
+                            total = float(total_text) if total_text else 0.0
+
+                            if cantidad == 0 and valor_unitario == 0 and total == 0:
+                                descripcion = desc_item.text().strip() if desc_item else ""
+                                if descripcion and (
+                                        "CAPÍTULO" in descripcion.upper() or "CAPITULO" in descripcion.upper()):
+                                    is_chapter_header = True
+
+                    except (ValueError, AttributeError):
+                        is_chapter_header = True
+
+                # Si no es encabezado, es una actividad
+                if not is_chapter_header:
+                    try:
+                        descripcion = desc_item.text() if desc_item else ''
+                        cantidad = float(cant_item.text()) if cant_item and cant_item.text().strip() else 0.0
+                        unidad = unid_item.text() if unid_item else ''
+                        valor_unitario = float(valor_item.text()) if valor_item and valor_item.text().strip() else 0.0
+                        total = float(total_item.text()) if total_item and total_item.text().strip() else 0.0
+
+                        activity = {
+                            'descripcion': descripcion,
+                            'cantidad': cantidad,
+                            'unidad': unidad,
+                            'valor_unitario': valor_unitario,
+                            'total': total,
+                            'id': activity_id
+                        }
+                        activities.append(activity)
+                        activity_id += 1
+
+                    except (ValueError, AttributeError) as e:
+                        print(f"Error procesando fila {row}: {e}")
+                        continue
+
+            # ✅ VALIDACIÓN 6: Verificar que haya al menos una actividad válida
+            if not activities:
+                QMessageBox.warning(
+                    self,
+                    "Sin Actividades Válidas",
+                    "No se encontraron actividades válidas para guardar.\n\n"
+                    "La cotización solo contiene encabezados de capítulo.\n"
+                    "Agregue al menos una actividad con:\n"
+                    "• Descripción\n"
+                    "• Cantidad mayor a 0\n"
+                    "• Valor unitario mayor a 0"
+                )
+                return
+
+            # Si llegamos aquí, todas las validaciones pasaron
+            # Continuar con el guardado usando la lógica existente mejorada
+
+            # Obtener todas las filas de la tabla (actividades y encabezados)
+            table_rows = []
+            for row in range(self.activities_table.rowCount()):
+                desc_item = self.activities_table.item(row, 0)
+                cant_item = self.activities_table.item(row, 1)
+                unid_item = self.activities_table.item(row, 2)
+                valor_item = self.activities_table.item(row, 3)
+                total_item = self.activities_table.item(row, 4)
+
+                # Determinar tipo
+                is_chapter_header = False
+                if desc_item and hasattr(desc_item, 'is_chapter_header'):
+                    is_chapter_header = desc_item.is_chapter_header
+                else:
+                    # Lógica de detección (ya implementada arriba)
+                    try:
+                        cant_text = cant_item.text().strip() if cant_item else ""
+                        valor_text = valor_item.text().strip() if valor_item else ""
+                        total_text = total_item.text().strip() if total_item else ""
+
+                        if not cant_text and not valor_text and not total_text:
+                            is_chapter_header = True
+                        elif all(float(text) == 0.0 for text in [cant_text, valor_text, total_text] if text):
+                            descripcion = desc_item.text().strip() if desc_item else ""
+                            if "CAPÍTULO" in descripcion.upper() or "CAPITULO" in descripcion.upper():
+                                is_chapter_header = True
+                    except:
+                        is_chapter_header = True
+
+                if is_chapter_header:
+                    chapter_row = {
+                        'type': 'chapter_header',
+                        'descripcion': desc_item.text() if desc_item else '',
+                        'chapter_id': getattr(desc_item, 'chapter_id', None) if desc_item else None,
+                        'row_index': row
+                    }
+                    table_rows.append(chapter_row)
+                else:
+                    # Buscar la actividad correspondiente
+                    for activity in activities:
+                        if activity.get('row_index') == row:
+                            activity['type'] = 'activity'
+                            table_rows.append(activity)
+                            break
+                    else:
+                        # Si no se encontró, crear una nueva
+                        try:
+                            activity = {
+                                'type': 'activity',
+                                'descripcion': desc_item.text() if desc_item else '',
+                                'cantidad': float(cant_item.text()) if cant_item and cant_item.text().strip() else 0.0,
+                                'unidad': unid_item.text() if unid_item else '',
+                                'valor_unitario': float(
+                                    valor_item.text()) if valor_item and valor_item.text().strip() else 0.0,
+                                'total': float(total_item.text()) if total_item and total_item.text().strip() else 0.0,
+                                'id': len(activities) + 1,
+                                'row_index': row
+                            }
+                            table_rows.append(activity)
+                        except:
+                            continue
 
             # Obtener valores AIU
             aiu_values = self.aiu_manager.get_aiu_values()
@@ -657,6 +1012,7 @@ class MainWindow(QMainWindow):
             cotizacion_data = {
                 'fecha': datetime.now().strftime('%Y-%m-%d'),
                 'cliente': client_data,
+                'table_rows': table_rows,
                 'actividades': activities,
                 'subtotal': subtotal,
                 'administracion': administracion,
@@ -664,11 +1020,17 @@ class MainWindow(QMainWindow):
                 'utilidad': utilidad,
                 'iva_utilidad': iva_utilidad,
                 'total': total,
-                'aiu_values': aiu_values
+                'aiu_values': aiu_values,
+                'version': '2.0'
             }
 
             # Abrir diálogo para guardar archivo
-            file_path, _ = QFileDialog.getSaveFileName(self, "Guardar Cotización", "", "Archivos de Cotización (*.cotiz);;Todos los archivos (*)")
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Guardar Cotización",
+                f"cotizacion_{client_data.get('nombre', 'cliente').replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}",
+                "Archivos de Cotización (*.cotiz);;Todos los archivos (*)"
+            )
 
             if file_path:
                 # Asegurar que tenga la extensión correcta
@@ -677,9 +1039,30 @@ class MainWindow(QMainWindow):
 
                 # Guardar archivo
                 self.cotizacion_controller.file_manager.guardar_cotizacion(cotizacion_data, file_path)
-                QMessageBox.information(self, "Éxito", f"Cotización guardada correctamente en:\n{file_path}")
+
+                QMessageBox.information(
+                    self,
+                    "Guardado Exitoso",
+                    f"Cotización guardada correctamente.\n\n"
+                    f"Archivo: {os.path.basename(file_path)}\n"
+                    f"Cliente: {client_data.get('nombre', 'N/A')}\n"
+                    f"Actividades: {len(activities)}\n"
+                    f"Total: ${total:,.2f}"
+                )
+
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Error al guardar archivo: {str(e)}")
+            QMessageBox.critical(
+                self,
+                "Error al Guardar",
+                f"Ocurrió un error inesperado al guardar el archivo:\n\n{str(e)}\n\n"
+                "Verifique que:\n"
+                "• Tenga permisos de escritura en la ubicación seleccionada\n"
+                "• No esté intentando sobrescribir un archivo en uso\n"
+                "• Todos los datos de la cotización sean válidos"
+            )
+            print(f"Error detallado: {e}")
+            import traceback
+            traceback.print_exc()
 
     def open_file_dialog(self):
         """Abre el diálogo para seleccionar un archivo de cotización"""
@@ -693,67 +1076,175 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", f"Error al abrir archivo: {str(e)}")
 
     def load_cotizacion_from_file(self, cotizacion_data):
-        """Carga una cotización desde un archivo"""
+        """
+        Carga los datos de una cotización desde archivo en la interfaz
+
+        Args:
+            cotizacion_data (dict): Datos completos de la cotización
+        """
         try:
-            # Limpiar formulario
-            self.clear_form()
+            print("Iniciando carga de cotización desde archivo...")
 
-            # Cargar datos del cliente
-            client_data = cotizacion_data['cliente']
+            # Guardar referencia a los datos importados
+            self.selected_cotizacion = cotizacion_data
 
-            # Buscar cliente en la base de datos o crearlo si no existe
-            clients = self.cotizacion_controller.get_all_clients()
-            client_exists = False
-            client_id = None
+            # 1. Cargar información del cliente
+            if 'cliente' in cotizacion_data and cotizacion_data['cliente']:
+                cliente = cotizacion_data['cliente']
+                print(f"Cargando cliente: {cliente.get('nombre', 'Sin nombre')}")
 
-            for client in clients:
-                if client['nombre'] == client_data['nombre'] and client['tipo'] == client_data['tipo']:
-                    client_exists = True
-                    client_id = client['id']
-                    break
+                # Actualizar campos del cliente en la interfaz si existen
+                if hasattr(self, 'client_name_field'):
+                    self.client_name_field.setText(cliente.get('nombre', ''))
+                if hasattr(self, 'client_nit_field'):
+                    self.client_nit_field.setText(cliente.get('nit', ''))
+                # Agregar más campos según tu interfaz
 
-            if not client_exists:
-                # Crear nuevo cliente
-                client_id = self.cotizacion_controller.add_client(client_data)
-                self.refresh_client_combo()
+            # 2. Limpiar tabla actual
+            self.activities_table.setRowCount(0)
+            print("Tabla limpiada")
 
-            # Seleccionar cliente en el combo
-            index = self.client_combo.findData(client_id)
-            if index >= 0:
-                self.client_combo.setCurrentIndex(index)
+            # 3. Cargar actividades en la tabla
+            activities_loaded = 0
 
-            # Cargar actividades
-            for activity in cotizacion_data['actividades']:
-                row = self.activities_table.rowCount()
-                self.activities_table.insertRow(row)
+            if 'table_rows' in cotizacion_data and cotizacion_data['table_rows']:
+                print(f"Cargando {len(cotizacion_data['table_rows'])} filas de table_rows")
+                for row_data in cotizacion_data['table_rows']:
+                    self.add_imported_row_to_table(row_data)
+                    if row_data.get('type') == 'activity':
+                        activities_loaded += 1
 
+            elif 'actividades' in cotizacion_data and cotizacion_data['actividades']:
+                print(f"Cargando {len(cotizacion_data['actividades'])} actividades")
+                for activity in cotizacion_data['actividades']:
+                    self.add_imported_activity_to_table(activity)
+                    activities_loaded += 1
+
+            print(f"Actividades cargadas en tabla: {activities_loaded}")
+
+            # 4. Cargar valores AIU si existen
+            if 'aiu_values' in cotizacion_data and cotizacion_data['aiu_values']:
+                try:
+                    # Usar método alternativo si set_aiu_values no existe
+                    if hasattr(self.aiu_manager, 'set_aiu_values'):
+                        self.aiu_manager.set_aiu_values(cotizacion_data['aiu_values'])
+                    elif hasattr(self.aiu_manager, 'update_from_imported_data'):
+                        self.aiu_manager.update_from_imported_data(cotizacion_data['aiu_values'])
+                    else:
+                        # Método manual para actualizar AIU
+                        aiu_data = cotizacion_data['aiu_values']
+                        print(f"Actualizando AIU manualmente: {aiu_data}")
+
+                        # Aquí puedes actualizar los campos AIU directamente si conoces sus nombres
+                        # Ejemplo (ajusta según los nombres reales de tus campos):
+                        # if hasattr(self, 'admin_spinbox'):
+                        #     self.admin_spinbox.setValue(float(aiu_data.get('administracion', 0)))
+
+                except Exception as aiu_error:
+                    print(f"Error cargando valores AIU: {aiu_error}")
+                    # Continuar sin AIU si falla
+
+            # 5. Actualizar totales
+            if hasattr(self, 'calculate_totals'):
+                self.calculate_totals()
+
+            # 6. Actualizar otros campos si existen
+            if 'fecha' in cotizacion_data and hasattr(self, 'date_field'):
+                self.date_field.setText(cotizacion_data['fecha'])
+
+            print("Cotización cargada exitosamente en la interfaz")
+            return True
+
+        except Exception as e:
+            print(f"Error cargando cotización en interfaz: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def add_imported_row_to_table(self, row_data):
+        """
+        Añade una fila importada a la tabla de actividades
+        """
+        try:
+            row_position = self.activities_table.rowCount()
+            self.activities_table.insertRow(row_position)
+
+            if row_data['type'] == 'chapter_header':
+                # Crear ítem de capítulo
+                item = QTableWidgetItem(row_data['descripcion'])
+                item.setData(Qt.UserRole, {'type': 'chapter'})
+                item.setBackground(QColor(200, 200, 200))
+                self.activities_table.setItem(row_position, 0, item)
+
+                # Llenar celdas vacías para el capítulo
+                for col in range(1, self.activities_table.columnCount()):
+                    empty_item = QTableWidgetItem("")
+                    empty_item.setBackground(QColor(200, 200, 200))
+                    self.activities_table.setItem(row_position, col, empty_item)
+
+            elif row_data['type'] == 'activity':
                 # Descripción
-                self.activities_table.setItem(row, 0, EditableTableWidgetItem(activity['descripcion']))
+                desc_item = QTableWidgetItem(row_data['descripcion'])
+                desc_item.setData(Qt.UserRole, {'type': 'activity'})
+                self.activities_table.setItem(row_position, 0, desc_item)
 
                 # Cantidad
-                self.activities_table.setItem(row, 1, EditableTableWidgetItem(activity['cantidad']))
+                self.activities_table.setItem(row_position, 1,
+                                              QTableWidgetItem(str(row_data.get('cantidad', 0))))
 
                 # Unidad
-                self.activities_table.setItem(row, 2, EditableTableWidgetItem(activity['unidad']))
+                self.activities_table.setItem(row_position, 2,
+                                              QTableWidgetItem(row_data.get('unidad', '')))
 
                 # Valor unitario
-                self.activities_table.setItem(row, 3, EditableTableWidgetItem(activity['valor_unitario']))
+                self.activities_table.setItem(row_position, 3,
+                                              QTableWidgetItem(str(row_data.get('valor_unitario', 0))))
 
                 # Total
-                total = activity['cantidad'] * activity['valor_unitario']
-                self.activities_table.setItem(row, 4, EditableTableWidgetItem(total, False))
+                total = row_data.get('total', 0)
+                if not total:  # Calcular si no existe
+                    cantidad = float(row_data.get('cantidad', 0))
+                    valor_unitario = float(row_data.get('valor_unitario', 0))
+                    total = cantidad * valor_unitario
 
-                # Botón eliminar
-                delete_btn = QPushButton("Eliminar")
-                delete_btn.clicked.connect(lambda _, r=row: self.delete_activity(r))
-                self.activities_table.setCellWidget(row, 5, delete_btn)
+                self.activities_table.setItem(row_position, 4, QTableWidgetItem(str(total)))
 
-            # Actualizar totales
-            self.update_totals()
-
-            QMessageBox.information(self, "Éxito", "Cotización cargada correctamente.")
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Error al cargar cotización: {str(e)}")
+            print(f"Error añadiendo fila a tabla: {e}")
+
+    def add_imported_activity_to_table(self, activity_data):
+        """
+        Añade una actividad importada (formato anterior) a la tabla
+        """
+        try:
+            row_position = self.activities_table.rowCount()
+            self.activities_table.insertRow(row_position)
+
+            # Descripción
+            desc_item = QTableWidgetItem(activity_data.get('descripcion', ''))
+            desc_item.setData(Qt.UserRole, {'type': 'activity'})
+            self.activities_table.setItem(row_position, 0, desc_item)
+
+            # Cantidad
+            self.activities_table.setItem(row_position, 1,
+                                          QTableWidgetItem(str(activity_data.get('cantidad', 0))))
+
+            # Unidad
+            self.activities_table.setItem(row_position, 2,
+                                          QTableWidgetItem(activity_data.get('unidad', '')))
+
+            # Valor unitario
+            self.activities_table.setItem(row_position, 3,
+                                          QTableWidgetItem(str(activity_data.get('valor_unitario', 0))))
+
+            # Total
+            cantidad = float(activity_data.get('cantidad', 0))
+            valor_unitario = float(activity_data.get('valor_unitario', 0))
+            total = cantidad * valor_unitario
+            self.activities_table.setItem(row_position, 4, QTableWidgetItem(str(total)))
+
+        except Exception as e:
+            print(f"Error añadiendo actividad a tabla: {e}")
 
     def send_email(self):
         """Abre el diálogo para enviar cotización por correo"""
@@ -785,6 +1276,96 @@ class MainWindow(QMainWindow):
         # Abrir diálogo de envío de correo
         email_dialog = SendEmailDialog(attachments, self)
         email_dialog.exec_()
+
+    def _load_table_rows_with_headers(self, table_rows):
+        """Carga las filas de la tabla incluyendo encabezados de capítulo (formato v2.0)"""
+        for row_data in table_rows:
+            if row_data['type'] == 'chapter_header':
+                # Es un encabezado de capítulo
+                self._insert_chapter_header_from_file(row_data)
+            elif row_data['type'] == 'activity':
+                # Es una actividad normal
+                self._insert_activity_from_file(row_data)
+
+    def _load_activities_only(self, activities):
+        """Carga solo actividades (formato v1.0 - compatibilidad hacia atrás)"""
+        for activity in activities:
+            self._insert_activity_from_file(activity)
+
+    def _insert_chapter_header_from_file(self, chapter_data):
+        """Inserta un encabezado de capítulo desde el archivo"""
+        row = self.activities_table.rowCount()
+        self.activities_table.insertRow(row)
+
+        # Crear item para el encabezado del capítulo
+        chapter_name = chapter_data.get('descripcion', '')
+        chapter_item = EditableTableWidgetItem(chapter_name, False)  # No editable
+
+        # Aplicar estilo visual para distinguirlo
+        from PyQt5.QtCore import Qt
+        from PyQt5.QtGui import QColor, QFont
+
+        # Fondo diferente para el encabezado
+        chapter_item.setBackground(QColor(230, 230, 250))  # Color lavanda claro
+
+        # Fuente en negrita
+        font = QFont()
+        font.setBold(True)
+        chapter_item.setFont(font)
+
+        # Centrar el texto
+        chapter_item.setTextAlignment(Qt.AlignCenter)
+
+        # Guardar información del capítulo como atributo personalizado
+        chapter_id = chapter_data.get('chapter_id')
+        if chapter_id:
+            chapter_item.chapter_id = chapter_id
+            chapter_item.is_chapter_header = True
+
+        # Colocar en la primera columna
+        self.activities_table.setItem(row, 0, chapter_item)
+
+        # Para las demás columnas, crear items vacíos con el mismo estilo
+        for col in range(1, 5):  # Columnas 1-4 (cantidad, unidad, valor, total)
+            empty_item = EditableTableWidgetItem("", False)
+            empty_item.setBackground(QColor(230, 230, 250))
+            empty_item.setTextAlignment(Qt.AlignCenter)
+            self.activities_table.setItem(row, col, empty_item)
+
+        # No agregar botón eliminar en la columna 5 para encabezados
+        # O agregar un botón especial si lo deseas
+
+    def _insert_activity_from_file(self, activity):
+        """Inserta una actividad desde el archivo"""
+        row = self.activities_table.rowCount()
+        self.activities_table.insertRow(row)
+
+        # Descripción
+        self.activities_table.setItem(row, 0, EditableTableWidgetItem(str(activity.get('descripcion', ''))))
+
+        # Cantidad
+        cantidad = activity.get('cantidad', 0)
+        self.activities_table.setItem(row, 1, EditableTableWidgetItem(str(cantidad)))
+
+        # Unidad
+        self.activities_table.setItem(row, 2, EditableTableWidgetItem(str(activity.get('unidad', ''))))
+
+        # Valor unitario
+        valor_unitario = activity.get('valor_unitario', 0)
+        self.activities_table.setItem(row, 3, EditableTableWidgetItem(str(valor_unitario)))
+
+        # Total (calculado o desde archivo)
+        if 'total' in activity:
+            total = activity['total']
+        else:
+            total = float(cantidad) * float(valor_unitario)
+
+        self.activities_table.setItem(row, 4, EditableTableWidgetItem(str(total), False))
+
+        # Botón eliminar
+        delete_btn = QPushButton("Eliminar")
+        delete_btn.clicked.connect(lambda _, r=row: self.delete_activity(r))
+        self.activities_table.setCellWidget(row, 5, delete_btn)
 
 
     def open_data_management(self):
