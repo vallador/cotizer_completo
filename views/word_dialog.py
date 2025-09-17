@@ -23,6 +23,7 @@ class ImprovedWordConfigDialog(QDialog):
 
         self.setup_ui()
         self.precargar_datos()
+        print("Tipo de cliente:", self.client_type)
 
     def setup_ui(self):
         """Configura la interfaz de usuario"""

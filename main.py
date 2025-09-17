@@ -30,6 +30,8 @@ def initialize_database_if_needed(db_path: str):
             sys.exit(1)
         except Exception as e:
             print(f"Error fatal al inicializar la base de datos: {e}")
+
+
             # Salir si la base de datos no se puede crear, ya que la app no puede funcionar.
             sys.exit(1)
 

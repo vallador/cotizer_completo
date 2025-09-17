@@ -401,6 +401,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             print(f"Error al cargar capítulos en el combo de selección: {e}")
 
+
     def insert_chapter_header(self):
         """Obtiene los datos del capítulo y le ordena a la tabla que inserte el encabezado."""
         chapter_id = self.chapter_selection_combo.currentData()

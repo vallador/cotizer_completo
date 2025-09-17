@@ -1,0 +1,66 @@
+{
+    "fecha": "2025-06-16",
+    "cliente": {
+        "id": 11,
+        "nombre": "WILLIAM MILLAN SOLUCIONES INTEGRALES EN CONSTRUCCION SAS",
+        "tipo": "Jurídica",
+        "direccion": "DG 85 79 A 20",
+        "nit": "900.702.966-7",
+        "telefono": "",
+        "email": "administrativo@grupowpro.com"
+    },
+    "actividades": [
+        {
+            "descripcion": "Retiro manual de manto asfáltico existente mediante herramientas mecánicas menores (espátulas, cinceles, martillo frío o palas planas), eliminando completamente las capas adheridas a la superficie, incluyendo residuos bituminosos deteriorados. Este procedimiento se realiza con precaución para evitar daños al sustrato original. Una vez retirada la totalidad del manto, se realiza limpieza exhaustiva de la base mediante cepillado, barrido industrial y, de ser necesario, lavado con agua a presión o desengrasantes neutros, eliminando polvo, residuos oleosos o partículas sueltas. Esta labor es indispensable para permitir la correcta identificación y posterior tratamiento de fisuras activas o pasivas, garantizando adherencia y efectividad de los nuevos sistemas impermeables o sellos.",
+            "cantidad": 92.0,
+            "unidad": "m2",
+            "valor_unitario": 14000.0,
+            "total": 1288000.0,
+            "id": 1
+        },
+        {
+            "descripcion": "Apertura controlada de fisuras o grietas mediante corte con disco diamantado, limpieza y preparación del sustrato. Aplicación de imprimante epóxico Sika® Dur 32 como puente de adherencia, seguido de relleno con sellante Sikaflex® Construction+ o Sika® Rót (según requerimiento de rigidez/flexibilidad). Finaliza con la aplicación localizada de impermeabilizante cementoso tipo SikaTop®-121 para garantizar la protección final del sistema.",
+            "cantidad": 1.0,
+            "unidad": "gb",
+            "valor_unitario": 1200000.0,
+            "total": 1200000.0,
+            "id": 2
+        },
+        {
+            "descripcion": "Elaboración de sobrecarpeta cementicia como base para sistema impermeable, mediante la instalación de una capa de mortero preparado en proporción 1:3 (cemento Holcim – arena cernida), reforzado con aditivos Sika®-1 como impermeabilizante integral y Sika® Latex como mejorador de adherencia, flexibilidad y resistencia mecánica. La mezcla se aplicará sobre superficie previamente preparada, libre de polvo, restos de manto y material suelto. Se garantiza espesor mínimo de 2 cm, acabado uniforme y juntas de control si se requiere. Esta sobrecarpeta actúa como base estructural nivelante para la posterior impermeabilización, ofreciendo mayor durabilidad frente a humedad, movimientos térmicos y tránsito ocasional.",
+            "cantidad": 92.0,
+            "unidad": "m2",
+            "valor_unitario": 24000.0,
+            "total": 2208000.0,
+            "id": 3
+        },
+        {
+            "descripcion": "Suministro y aplicación de SikaTop®‑121, mortero cementoso acrílico monocomponente, como primera capa sobre el concreto existente. Funciona como barrera de vapor y puente de adherencia para sistemas futuros. Se aplica con llana metálica, en espesores de 1–2 mm, asegurando integración plena con el sustrato y proporcionando resistencia hidrostática, durabilidad mecánica y química. Ideal como soporte para sistemas térmicos o impermeabilizantes adicionales.",
+            "cantidad": 92.0,
+            "unidad": "m2",
+            "valor_unitario": 22000.0,
+            "total": 2024000.0,
+            "id": 4
+        },
+        {
+            "descripcion": "Suministro y aplicación de membrana impermeabilizante líquida Sikafill® Power a tres manos, sistema de alta performance con garantía extendida de 12 años, reforzado con malla de fibra Sika® Felt FPP-30. Se aplica la primera capa mediante rodillo o brocha, sobre la cual se incorpora inmediatamente la tela de refuerzo Sika® Felt FPP-30, adhiriéndola directamente con la misma capa húmeda del producto para evitar juntas y garantizar integración completa del refuerzo al sistema. Posteriormente se aplican las capas adicionales respetando los tiempos de curado entre aplicaciones. El sistema genera membrana elástica, continua y altamente reforzada, con excelente resistencia a la intemperie, rayos UV y variaciones térmicas. La incorporación de la tela proporciona resistencia adicional al punzonamiento y mayor capacidad de puenteo de fisuras, siendo ideal para áreas críticas que requieren protección duradera y confiabilidad comprobada a largo plazo.",
+            "cantidad": 92.0,
+            "unidad": "m2",
+            "valor_unitario": 38000.0,
+            "total": 3496000.0,
+            "id": 5
+        }
+    ],
+    "subtotal": 10216000.0,
+    "administracion": 715120.0000000001,
+    "imprevistos": 306480.0,
+    "utilidad": 510800.0,
+    "iva_utilidad": 97052.0,
+    "total": 11845452.0,
+    "aiu_values": {
+        "administracion": 7,
+        "imprevistos": 3,
+        "utilidad": 5,
+        "iva_sobre_utilidad": 19
+    }
+}
