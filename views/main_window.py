@@ -496,6 +496,7 @@ class MainWindow(QMainWindow):
         """Prepara los datos y llama al controlador de Excel."""
         structured_items = []
 
+
         # Priorizar datos de cotización importada si están disponibles
         if hasattr(self, 'selected_cotizacion') and self.selected_cotizacion:
             print("Usando datos de cotización importada")  # Debug
@@ -556,9 +557,12 @@ class MainWindow(QMainWindow):
 
         # Obtener valores AIU
         aiu_values = self.aiu_manager.get_aiu_values()
+        nombre_cliente = self.nombre_input.text()
+        print("Nombre capturado:", repr(nombre_cliente))
 
         # Crear controlador de Excel
         try:
+
             excel_path = self.excel_controller.generate_excel(
                 items=structured_items,
                 activities=structured_items,
@@ -566,7 +570,8 @@ class MainWindow(QMainWindow):
                 administracion=aiu_values['administracion'],
                 imprevistos=aiu_values['imprevistos'],
                 utilidad=aiu_values['utilidad'],
-                iva_utilidad=aiu_values['iva_sobre_utilidad']
+                iva_utilidad=aiu_values['iva_sobre_utilidad'],
+                nombre_cliente= nombre_cliente
             )
             if show_message:
                 QMessageBox.information(self, "Éxito", f"Archivo Excel generado en:\n{excel_path}")
@@ -578,6 +583,7 @@ class MainWindow(QMainWindow):
             return
 
         return excel_path
+
     def generate_word(self):
         """Genera un documento Word con la cotización actual"""
         try:
@@ -629,18 +635,85 @@ class MainWindow(QMainWindow):
                 # Crear controlador de Word
                 word_controller = WordController(self.cotizacion_controller)
 
-                # Generar Word según el tipo de cliente
+                # ==========================================
+                # NUEVA LÓGICA: Solo usar plantillas existentes
+                # ==========================================
+
+                # Obtener ID de la cotización (necesitarás ajustar esto según tu lógica)
+                cotizacion_id = self.get_current_cotizacion_id()  # Implementa este método
+
+                # Preparar datos adicionales para el reemplazo de marcadores
+                datos_adicionales = {
+                    'referencia': config.get('referencia', f"Cotización para {client_data['nombre']}"),
+                    'validez': config.get('validez', '30'),
+                    'cuadrillas': config.get('cuadrillas', 'una'),
+                    'operarios': config.get('operarios_num', '2'),
+                    'plazo': config.get('plazo_dias', '15'),
+                    'forma_pago': self._determinar_forma_pago(config)
+                }
+
+                # Determinar formato según tipo de cliente y preferencia
                 if config["client_type"] == "natural":
-                    word_path = word_controller.generate_natural_cotizacion(config, excel_path)
+                    formato = 'corto'  # Siempre corto para personas naturales
                 elif config["client_type"] == "juridica":
-                    word_path = word_controller.generate_juridica_cotizacion(config, excel_path)
+                    # Podrías agregar una opción en el diálogo para elegir formato
+                    formato = 'corto'  # o 'largo' según prefieras por defecto
                 else:
-                    QMessageBox.warning(self, "Error", "Tipo de cliente no reconocido en la configuración del diálogo.")
-                    return
+                    formato = 'auto'  # Deja que el sistema decida
+
+                # GENERAR DOCUMENTO USANDO SOLO PLANTILLAS EXISTENTES
+                word_path = word_controller.generate_word_document(
+                    cotizacion_id=cotizacion_id,
+                    excel_path=excel_path,
+                    datos_adicionales=datos_adicionales,
+                    formato=formato
+                )
 
                 QMessageBox.information(self, "Éxito", f"Documento Word generado correctamente en:\n{word_path}")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error al generar el Word: {str(e)}")
+
+    def get_current_cotizacion_id(self):
+        """Versión simplificada que usa ID fijo y crea el método obtener_cotizacion si no existe"""
+
+        # Si el cotizacion_controller no tiene el método obtener_cotizacion, lo creamos
+        if not hasattr(self.cotizacion_controller, 'obtener_cotizacion'):
+            def obtener_cotizacion(cotizacion_id):
+                # Crear cliente temporal con datos de la interfaz
+                cliente_temporal = type('Cliente', (), {
+                    'tipo': self.tipo_combo.currentText(),
+                    'nombre': self.nombre_input.text(),
+                    'nit': self.nit_input.text() if self.nit_input.text() else 'N/A',
+                    'direccion': self.direccion_input.text() if self.direccion_input.text() else 'N/A',
+                    'telefono': self.telefono_input.text() if self.telefono_input.text() else 'N/A',
+                    'email': self.email_input.text() if self.email_input.text() else 'N/A'
+                })()
+
+                # Crear cotización temporal
+                cotizacion_temporal = type('Cotizacion', (), {
+                    'id': cotizacion_id,
+                    'cliente': cliente_temporal
+                })()
+
+                return cotizacion_temporal
+
+            # Asignar el método al controlador
+            self.cotizacion_controller.obtener_cotizacion = obtener_cotizacion
+
+        return 1  # ID fijo temporal
+
+    def _determinar_forma_pago(self, config):
+        """
+        Determina la forma de pago basada en la configuración del diálogo.
+        """
+        if config.get("pago_contraentrega"):
+            return "contraentrega"
+        elif config.get("pago_porcentajes"):
+            return "porcentajes"  # El WordController se encargará de formatear los porcentajes
+        elif config.get("pago_personalizado"):
+            return config.get("pago_personalizado", "Contraentrega")
+        else:
+            return "contraentrega"  # Por defecto
 
     def load_imported_cotizacion_to_ui(self, cotizacion_data):
         """

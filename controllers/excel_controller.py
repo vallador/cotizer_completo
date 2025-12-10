@@ -83,7 +83,8 @@ class ExcelController:
                 bottom = medium if row == end_row else thin
 
                 cell.border = Border(left=left, right=right, top=top, bottom=bottom)
-    def generate_excel(self,activities, items, tipo_persona, administracion, imprevistos, utilidad, iva_utilidad):
+    def generate_excel(self, items, activities, tipo_persona, administracion, imprevistos, utilidad, iva_utilidad, nombre_cliente=""):
+
         """
         Genera un archivo Excel de cotización profesional, manejando capítulos,
         formato de celdas y lógica de AIU/IVA.
@@ -281,7 +282,9 @@ class ExcelController:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         export_dir = "exports"
         if not os.path.exists(export_dir): os.makedirs(export_dir)
-        excel_path = os.path.join(export_dir, f"cotizacion_{timestamp}.xlsx")
+        safe_name = "".join(c for c in nombre_cliente if c.isalnum() or c in (" ", "_", "-")).strip()
+        safe_name = safe_name.replace(" ", "_")
+        excel_path = os.path.join(export_dir, f"cotizacion_{safe_name}_{timestamp}.xlsx")
 
         try:
             workbook.save(excel_path)
