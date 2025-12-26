@@ -83,7 +83,37 @@ class ExcelController:
                 bottom = medium if row == end_row else thin
 
                 cell.border = Border(left=left, right=right, top=top, bottom=bottom)
-    def generate_excel(self, items, activities, tipo_persona, administracion, imprevistos, utilidad, iva_utilidad, nombre_cliente=""):
+
+    def _insertar_subtotal_capitulo(self, sheet, row_num, start_row, chapter_num):
+        """Inserta subtotal y devuelve la siguiente fila y la referencia de celda."""
+        subtotal_font = Font(bold=True, italic=True, color="FFFFFF")
+        subtotal_fill = PatternFill(start_color="008080", end_color="008080", fill_type="solid")
+        # Mantener la alineación para que no se rompa el ajuste automático de la fila
+        alignment = Alignment(horizontal="right", vertical="center")
+
+        sheet.merge_cells(start_row=row_num, start_column=1, end_row=row_num, end_column=5)
+
+        cell_label = sheet.cell(row=row_num, column=1)
+        cell_label.value = f"SUBTOTAL CAPÍTULO {chapter_num}.0"
+        cell_label.font = subtotal_font
+        cell_label.fill = subtotal_fill
+        cell_label.alignment = alignment
+
+        cell_total = sheet.cell(row=row_num, column=6)
+        cell_total.value = f"=SUM(F{start_row}:F{row_num - 1})"
+        cell_total.font = subtotal_font
+        cell_total.fill = subtotal_fill
+        cell_total.alignment = alignment
+        cell_total.number_format = '"$"#,##0.00'
+
+        # Aplicar bordes para que combine con el resto
+        self.bordes_marco_con_interior(sheet, row_num, row_num)
+
+        celda_referencia = f"F{row_num}"
+        return row_num + 1, celda_referencia
+
+
+    def generate_excel(self, items, activities, tipo_persona, administracion, imprevistos, utilidad, iva_utilidad, nombre_cliente="", ruta_personalizada=""):
 
         """
         Genera un archivo Excel de cotización profesional, manejando capítulos,
@@ -125,59 +155,53 @@ class ExcelController:
 
         # 4. --- PROCESAMIENTO DE LOS ÍTEMS (CAPÍTULOS Y ACTIVIDADES) ---
         row_num = 2
-        item_counter = 1
+        chapter_counter = 0
+        activity_counter = 0
+        chapter_start_row = None
+        capitulos_subtotales_celdas = []
 
-        for item in items:
+        for i, item in enumerate(items):
             if item['type'] == 'chapter':
+                # Antes de iniciar un nuevo capítulo, cerramos el anterior (si existe)
+                if chapter_counter > 0 and activity_counter > 0:
+                    row_num, celda_subtotal = self._insertar_subtotal_capitulo(sheet, row_num, chapter_start_row,chapter_counter)
+                    capitulos_subtotales_celdas.append(celda_subtotal)
+
+                chapter_counter += 1
+                activity_counter = 0
+
                 sheet.merge_cells(start_row=row_num, start_column=1, end_row=row_num, end_column=6)
                 cell = sheet.cell(row=row_num, column=1)
-                cell.value = item['name'].upper()
+                cell.value = f"{chapter_counter}.0 {item['name'].upper()}"
                 cell.font = chapter_font
                 cell.fill = chapter_fill
                 cell.alignment = center_alignment
                 row_num += 1
+                chapter_start_row = row_num
 
             elif item['type'] == 'activity':
+                activity_counter += 1
+                item_label = f"{chapter_counter}.{activity_counter}"
 
-
-                total_actividad = float(item['cantidad']) * float(item['valor_unitario'])
-
-                sheet.cell(row=row_num, column=1).value = item_counter
-
+                # Llenado de datos
+                sheet.cell(row=row_num, column=1).value = item_label
                 sheet.cell(row=row_num, column=2).value = item['descripcion']
-
                 sheet.cell(row=row_num, column=3).value = float(item['cantidad'])
-
                 sheet.cell(row=row_num, column=4).value = item['unidad']
-
                 sheet.cell(row=row_num, column=5).value = float(item['valor_unitario'])
+                sheet.cell(row=row_num, column=6).value = f"=C{row_num}*E{row_num}"
 
-                sheet.cell(row=row_num, column=6).value = total_actividad
-
-                # 2. Aplicar alineaciones a todas las celdas de la fila.
-
-
-                sheet.cell(row=row_num, column=1).alignment = center_alignment
-
-                sheet.cell(row=row_num, column=2).alignment = description_alignment
-
-                sheet.cell(row=row_num, column=3).alignment = center_alignment
-
-                sheet.cell(row=row_num, column=4).alignment = center_alignment
-
-                sheet.cell(row=row_num, column=5).alignment = center_alignment
-
-                sheet.cell(row=row_num, column=6).alignment = center_alignment
-
+                # Estilos y formatos
+                for col in range(1, 7):
+                    sheet.cell(row=row_num,column=col).alignment = description_alignment if col == 2 else center_alignment
                 sheet.cell(row=row_num, column=5).number_format = '"$"#,##0.00'
-
                 sheet.cell(row=row_num, column=6).number_format = '"$"#,##0.00'
-
-                # 3. Incrementar contadores para la siguiente fila.
-
-                item_counter += 1
-
                 row_num += 1
+
+        if chapter_counter > 0 and activity_counter > 0:
+            row_num, celda_subtotal = self._insertar_subtotal_capitulo(sheet, row_num, chapter_start_row,chapter_counter)
+            capitulos_subtotales_celdas.append(celda_subtotal)
+
 
         # 5. --- CÁLCULO DE SUBTOTAL, TOTALES Y AIU ---
         subtotal_row_num = row_num
@@ -185,11 +209,17 @@ class ExcelController:
 
         # Fila de Subtotal
         sheet.merge_cells(f"A{subtotal_row_num}:E{subtotal_row_num}")
-        sheet[f"A{subtotal_row_num}"].value = "SUBTOTAL COSTOS DIRECTOS"
+        sheet[f"A{subtotal_row_num}"].value = "TOTAL COSTOS DIRECTOS"
         sheet[f"A{subtotal_row_num}"].font = header_font
         sheet[f"A{subtotal_row_num}"].fill = header_fill
         sheet[f"A{subtotal_row_num}"].alignment = Alignment(horizontal="right")
-        sheet[subtotal_cell_address].value = f"=SUM(F2:F{subtotal_row_num - 1})"
+
+        if capitulos_subtotales_celdas:
+            formula_subtotales = ",".join(capitulos_subtotales_celdas)
+            sheet[subtotal_cell_address].value = f"=SUM({formula_subtotales})"
+        else:
+            sheet[subtotal_cell_address].value = 0
+
         sheet[subtotal_cell_address].number_format = '"$"#,##0.00'
         sheet[subtotal_cell_address].font = header_font
         sheet[subtotal_cell_address].fill = header_fill
@@ -280,11 +310,21 @@ class ExcelController:
 
         # 6. --- GUARDAR EL ARCHIVO ---
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        export_dir = "exports"
-        if not os.path.exists(export_dir): os.makedirs(export_dir)
+        if ruta_personalizada and os.path.exists(ruta_personalizada):
+            export_dir = ruta_personalizada
+
+        else:
+            # Fallback a la carpeta local si no hay ruta seleccionada
+            export_dir = "exports"
+            if not os.path.exists(export_dir):
+                os.makedirs(export_dir)
+
         safe_name = "".join(c for c in nombre_cliente if c.isalnum() or c in (" ", "_", "-")).strip()
         safe_name = safe_name.replace(" ", "_")
-        excel_path = os.path.join(export_dir, f"cotizacion_{safe_name}_{timestamp}.xlsx")
+
+        # Construir la ruta final
+        filename = f"cotizacion_{safe_name}_{timestamp}.xlsx"
+        excel_path = os.path.join(export_dir, filename)
 
         try:
             workbook.save(excel_path)

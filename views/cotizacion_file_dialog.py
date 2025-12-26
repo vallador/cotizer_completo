@@ -122,48 +122,29 @@ class CotizacionFileDialog(QDialog):
             self.info_label.setText(f"Error al cargar información: {str(e)}")
             self.selected_cotizacion = None
     
-    def get_selected_cotizacion(self):
-        """
-        Devuelve la cotización seleccionada actualmente.
-        
-        Returns:
-            dict: Datos de la cotización seleccionada o None si no hay selección
-        """
-        selected_items = self.cotizaciones_list.selectedItems()
-        if not selected_items:
-            return None
-            
-        filepath = selected_items[0].data(Qt.UserRole)
-        try:
-            return self.file_manager.cargar_cotizacion(filepath)
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Error al obtener la cotización seleccionada: {str(e)}")
-            return None
+
 
     def open_cotizacion(self):
-        """Abre la cotización seleccionada para edición"""
         selected_items = self.cotizaciones_list.selectedItems()
         if not selected_items:
-            QMessageBox.warning(self, "Advertencia", "Debe seleccionar una cotización para abrir.")
+            QMessageBox.warning(self, "Advertencia", "Debe seleccionar una cotización.")
             return
 
         filepath = selected_items[0].data(Qt.UserRole)
+
         try:
             cotizacion = self.file_manager.cargar_cotizacion(filepath)
-            self.selected_cotizacion = cotizacion  # Guardar la cotización seleccionada
 
-            # 🔄 En lugar de cargar directamente, solo cerrar el diálogo
-            # El main.py se encargará de cargar usando get_selected_cotizacion()
+            if not self._validate_cotizacion_format(cotizacion):
+                QMessageBox.warning(self, "Formato inválido", "Archivo incorrecto.")
+                return
 
-            # ✅ Validar que la cotización tenga el formato esperado
-            if self._validate_cotizacion_format(cotizacion):
-                self.accept()  # Cerrar el diálogo - el main se encarga del resto
-            else:
-                QMessageBox.warning(self, "Formato Inválido",
-                                    "El archivo seleccionado no tiene el formato correcto de cotización.")
+            self.selected_cotizacion = cotizacion
+            self.source = "open"  # 🔑 CLAVE
+            self.accept()
 
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Error al abrir la cotización: {str(e)}")
+            QMessageBox.critical(self, "Error", str(e))
 
     def save_current_cotizacion(self):
         """Guarda la cotización actual como archivo"""
@@ -186,37 +167,50 @@ class CotizacionFileDialog(QDialog):
             QMessageBox.critical(self, "Error", f"Error al guardar la cotización: {str(e)}")
 
     def import_cotizacion(self):
-        """Importa una cotización desde un archivo JSON externo"""
         filepath, _ = QFileDialog.getOpenFileName(
-            self, "Importar Cotización", "",
-            "Archivos JSON (*.json);;Archivos de Cotización (*.cotiz);;Todos los archivos (*)"
+            self,
+            "Importar Cotización",
+            "",
+            "Archivos JSON (*.json);;Archivos de Cotización (*.cotiz)"
         )
 
         if not filepath:
-            print("Usuario canceló la selección de archivo")
             return
 
         try:
-            print(f"Intentando importar archivo: {filepath}")  # Debug
-
-            # Cargar el archivo usando el método mejorado del file_manager
             cotizacion = self.file_manager.cargar_cotizacion(filepath)
 
-            print(f"Cotización cargada: {type(cotizacion)}")  # Debug
-            print(f"Claves de cotización: {list(cotizacion.keys()) if isinstance(cotizacion, dict) else 'No es dict'}")
-
-            # El file_manager ya valida que no sea None y que sea dict
-            # Solo validar campos específicos del negocio
-
-            # Validar campos mínimos requeridos para el negocio
-            if 'cliente' not in cotizacion or cotizacion['cliente'] is None:
-                QMessageBox.critical(self, "Error", "El archivo no contiene información del cliente requerida.")
+            if 'cliente' not in cotizacion or not isinstance(cotizacion['cliente'], dict):
+                QMessageBox.critical(self, "Error", "Información de cliente inválida.")
                 return
 
-            if not isinstance(cotizacion['cliente'], dict):
-                QMessageBox.critical(self, "Error",
-                                     "La información del cliente en el archivo no tiene el formato correcto.")
-                return
+            # Guardar físicamente en el directorio de cotizaciones
+            new_filepath = self.file_manager.guardar_cotizacion(cotizacion)
+
+            # 🔹 ACTUALIZAR LISTA DEL DIÁLOGO
+            item = QListWidgetItem(os.path.basename(new_filepath))
+            item.setData(Qt.UserRole, new_filepath)
+            self.cotizaciones_list.addItem(item)
+
+            # 🔹 Seleccionar el nuevo item
+            self.cotizaciones_list.setCurrentItem(item)
+
+            # 🔹 Actualizar panel de info
+            self.update_info_label()
+
+            QMessageBox.information(
+                self,
+                "Éxito",
+                "Cotización importada correctamente.\nSeleccione y presione Abrir para cargarla."
+            )
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error al importar la cotización:\n{str(e)}")
+
+
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", str(e))
 
             # Validar que tenga actividades o table_rows
             has_activities = 'actividades' in cotizacion and isinstance(cotizacion['actividades'], list) and len(
@@ -236,21 +230,15 @@ class CotizacionFileDialog(QDialog):
 
             self.selected_cotizacion = cotizacion  # Guardar la cotización seleccionada
 
-            print("Intentando guardar la cotización...")  # Debug
-
             # Copiar al directorio de cotizaciones
             new_filepath = self.file_manager.guardar_cotizacion(cotizacion)
 
-            # NUEVO: Cargar los datos en la interfaz de usuario
-            try:
-                # Necesitas tener acceso a la ventana principal
-                # Asumiendo que tienes una referencia a ella como self.main_window
-                if hasattr(self, 'main_window') and self.main_window:
-                    self.main_window.load_imported_cotizacion_to_ui(cotizacion)
-                    print("Datos cargados en la interfaz de usuario")
-            except Exception as ui_error:
-                print(f"Error cargando en interfaz, pero archivo guardado: {ui_error}")
-                # No interrumpir el proceso si falla la carga en UI
+            main_win = self.parent()
+            if main_win and hasattr(main_win, 'load_imported_cotizacion_to_ui'):
+                main_win.load_imported_cotizacion_to_ui(cotizacion)
+                print("DEBUG: Llamada a load_imported_cotizacion_to_ui exitosa")
+            else:
+                print("DEBUG: No se encontró la referencia a MainWindow")
 
             QMessageBox.information(self, "Éxito",
                                     f"Cotización importada correctamente como:\n{os.path.basename(new_filepath)}")
@@ -273,6 +261,8 @@ class CotizacionFileDialog(QDialog):
             print(f"Error detallado: {e}")  # Debug
             import traceback
             traceback.print_exc()  # Debug completo
+
+
 
     def export_cotizacion(self):
         """Exporta la cotización seleccionada a un archivo JSON externo"""

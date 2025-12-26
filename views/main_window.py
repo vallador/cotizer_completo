@@ -1,8 +1,8 @@
-from PyQt5.QtWidgets import QMainWindow, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QLineEdit, QComboBox, QTableWidget, \
+from PyQt5.QtWidgets import QMainWindow, QCheckBox, QDialog, QPushButton, QLabel, QLineEdit, QComboBox, QTableWidget, \
     QTableWidgetItem, QMessageBox, QWidget, QDoubleSpinBox, QHeaderView, QTextEdit, QFileDialog, QSplitter,\
-    QScrollArea, QGridLayout, QApplication, QVBoxLayout, QHBoxLayout, QAbstractItemView, QGroupBox,QFormLayout
+    QGridLayout, QApplication, QVBoxLayout, QHBoxLayout, QAbstractItemView, QGroupBox,QFormLayout
 from PyQt5.QtCore import Qt, pyqtSlot, QMimeData, QByteArray
-from PyQt5.QtGui import QPalette, QColor, QDrag, QFont
+from PyQt5.QtGui import QPalette, QColor, QDrag, QFont, QPixmap
 import os
 from datetime import datetime
 from controllers.word_controller import WordController
@@ -10,6 +10,7 @@ from views.data_management_window import DataManagementWindow
 from views.email_dialog import SendEmailDialog
 from views.word_dialog import ImprovedWordConfigDialog
 from views.cotizacion_file_dialog import CotizacionFileDialog
+from utils.excel_to_word import ExcelToWordAutomation
 
 class EditableTableWidgetItem(QTableWidgetItem):
     """Un QTableWidgetItem que se asegura de que los valores numéricos se traten como texto."""
@@ -160,6 +161,8 @@ class DraggableTableWidget(QTableWidget):
         self.setItem(row, 0, header_item)
         # Hacemos que la fila de capítulo no se pueda seleccionar, editar ni arrastrar.
         header_item.setFlags(header_item.flags() & ~Qt.ItemIsSelectable & ~Qt.ItemIsEditable & ~Qt.ItemIsDragEnabled)
+
+
 class MainWindow(QMainWindow):
     def __init__(self, cotizacion_controller, excel_controller):
         super().__init__()
@@ -168,6 +171,8 @@ class MainWindow(QMainWindow):
         self.cotizacion_controller = cotizacion_controller
         self.excel_controller = excel_controller
         self.aiu_manager = self.cotizacion_controller.aiu_manager
+        # Variable para almacenar la ruta del logo
+        self.RUTA_LOGO_ESTATICO = "ING_INT_LOG.png"
 
         self.setWindowTitle("Sistema de Cotizaciones")
         self.setGeometry(100, 100, 1300, 850)
@@ -177,6 +182,10 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
 
+        # --- SECCIÓN SUPERIOR DIVIDIDA ---
+        top_layout = QHBoxLayout()
+
+        # 1. Grupo de Información del Cliente (Izquierda)
         client_group = QGroupBox("Información del Cliente")
         client_main_layout = QVBoxLayout(client_group)
 
@@ -220,6 +229,53 @@ class MainWindow(QMainWindow):
         client_main_layout.addWidget(save_client_btn, 0, Qt.AlignLeft)
 
         main_layout.addWidget(client_group)
+
+        # 2. Grupo de Destino del Proyecto (Derecha)
+        project_group = QGroupBox("Ubicación del Proyecto")
+        project_layout = QVBoxLayout(project_group)
+
+        # Logo Estático (Se muestra siempre arriba a la derecha)
+        self.logo_label = QLabel()
+        self.logo_label.setFixedSize(200, 80)  # Ajusta el tamaño según tu logo
+        self.logo_label.setAlignment(Qt.AlignCenter)
+        if os.path.exists(self.RUTA_LOGO_ESTATICO):
+            pixmap = QPixmap(self.RUTA_LOGO_ESTATICO)
+            self.logo_label.setPixmap(
+                pixmap.scaled(self.logo_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        else:
+            self.logo_label.setText("LOGO EMPRESA")
+            self.logo_label.setStyleSheet("font-weight: bold; color: gray; border: 1px solid #ccc;")
+
+        project_layout.addWidget(self.logo_label, 0, Qt.AlignCenter)
+
+        # Selección de Carpeta de Guardado
+        project_layout.addWidget(QLabel("Carpeta de destino para archivos:"))
+        path_layout = QHBoxLayout()
+        self.path_input = QLineEdit()
+        self.path_input.setPlaceholderText("Ruta donde se guardarán Excel/Word...")
+        self.path_input.setReadOnly(True)  # Para que no escriban rutas inválidas a mano
+
+        btn_folder = QPushButton("Seleccionar Carpeta")
+        btn_folder.clicked.connect(self.definir_ruta_proyecto)
+
+        path_layout.addWidget(self.path_input)
+        path_layout.addWidget(btn_folder)
+        project_layout.addLayout(path_layout)
+
+        # Opción de carpeta existente
+        self.check_existente = QCheckBox("La carpeta ya existe (usar para esta cotización)")
+        project_layout.addWidget(self.check_existente)
+
+        # Botón para verificar archivos
+        btn_ver_carpeta = QPushButton("Abrir Carpeta del Proyecto")
+        btn_ver_carpeta.clicked.connect(self.abrir_explorador)
+        project_layout.addWidget(btn_ver_carpeta)
+
+        # Unir las dos secciones superiores
+        top_layout.addWidget(client_group, 65)  # 65% de ancho
+        top_layout.addWidget(project_group, 35)  # 35% de ancho
+
+        main_layout.addLayout(top_layout)
 
         ### -----------------------------------------------------------------------------------------
         ### 4. SECCIÓN CENTRAL: DIVISOR (SPLITTER)
@@ -370,11 +426,23 @@ class MainWindow(QMainWindow):
         self.dark_mode = False
         self.load_initial_data()
 
-    ### =============================================================================================
-    ### MÉTODOS DE LÓGICA DE LA INTERFAZ
-    ### El resto de tus métodos no necesitan cambios.
-    ### =============================================================================================
 
+    def definir_ruta_proyecto(self):
+        """Abre el diálogo para que el usuario elija la carpeta del proyecto."""
+        folder = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta de Guardado para el Proyecto")
+        if folder:
+            self.path_input.setText(folder)
+            # Guardamos la ruta en el controlador para que Generar Excel la use
+            self.cotizacion_controller.ruta_destino_archivos = folder
+
+    def abrir_explorador(self):
+        """Abre la carpeta de destino en Windows para ver los archivos generados."""
+        path = self.path_input.text()
+        if os.path.exists(path):
+            os.startfile(path)
+        else:
+            # Podrías mostrar un mensaje de error si no hay ruta seleccionada
+            pass
     def load_initial_data(self):
         """Carga los datos iniciales en la interfaz"""
         try:
@@ -493,23 +561,16 @@ class MainWindow(QMainWindow):
         self.total_label.setText(f"${total:,.2f}")
 
     def generate_excel(self, show_message=True):
-        """Prepara los datos y llama al controlador de Excel."""
+        """Prepara los datos, genera el Excel y luego automatiza Word y PDF."""
         structured_items = []
 
-
-        # Priorizar datos de cotización importada si están disponibles
+        # --- 1. RECOLECCIÓN DE DATOS ---
         if hasattr(self, 'selected_cotizacion') and self.selected_cotizacion:
-            print("Usando datos de cotización importada")  # Debug
             cotizacion = self.selected_cotizacion
-
-            # Usar table_rows si existe, sino usar actividades (compatibilidad)
             if 'table_rows' in cotizacion:
                 for row_data in cotizacion['table_rows']:
                     if row_data['type'] == 'chapter_header':
-                        structured_items.append({
-                            'type': 'chapter',
-                            'name': row_data['descripcion']
-                        })
+                        structured_items.append({'type': 'chapter', 'name': row_data['descripcion']})
                     elif row_data['type'] == 'activity':
                         structured_items.append({
                             'type': 'activity',
@@ -518,51 +579,35 @@ class MainWindow(QMainWindow):
                             'unidad': row_data.get('unidad', ''),
                             'valor_unitario': float(row_data.get('valor_unitario', 0)),
                         })
-            elif 'actividades' in cotizacion:
-                # Formato anterior por compatibilidad
-                for activity in cotizacion['actividades']:
-                    structured_items.append({
-                        'type': 'activity',
-                        'descripcion': activity.get('descripcion', ''),
-                        'cantidad': float(activity.get('cantidad', 0)),
-                        'unidad': activity.get('unidad', ''),
-                        'valor_unitario': float(activity.get('valor_unitario', 0)),
-                    })
         else:
-            # Usar datos de la tabla de la interfaz (comportamiento original)
-            print("Usando datos de la tabla de interfaz")  # Debug
+            # Extraer de la tabla de la interfaz
             for row in range(self.activities_table.rowCount()):
-                first_item = self.activities_table.item(row, 0)
-                if not first_item or not first_item.data(Qt.UserRole):
+                item = self.activities_table.item(row, 0)
+                if not item or not item.data(Qt.UserRole):
                     continue
-
-                metadata = first_item.data(Qt.UserRole)
+                metadata = item.data(Qt.UserRole)
                 if metadata['type'] == 'chapter':
-                    structured_items.append({'type': 'chapter', 'name': first_item.text()})
+                    structured_items.append({'type': 'chapter', 'name': item.text()})
                 elif metadata['type'] == 'activity':
                     structured_items.append({
                         'type': 'activity',
-                        'descripcion': first_item.text(),
+                        'descripcion': item.text(),
                         'cantidad': float(self.activities_table.item(row, 1).text()),
                         'unidad': self.activities_table.item(row, 2).text(),
                         'valor_unitario': float(self.activities_table.item(row, 3).text()),
                     })
 
-        print(f"Total de items estructurados: {len(structured_items)}")  # Debug
-        print(f"Actividades encontradas: {sum(1 for item in structured_items if item['type'] == 'activity')}")  # Debug
-
+        # Validación: Si no hay actividades, salir
         if not any(item['type'] == 'activity' for item in structured_items):
-            QMessageBox.warning(self, "Vacío", "No hay actividades en la cotización para generar el Excel.")
+            QMessageBox.warning(self, "Vacío", "No hay actividades para procesar.")
             return
 
-        # Obtener valores AIU
-        aiu_values = self.aiu_manager.get_aiu_values()
-        nombre_cliente = self.nombre_input.text()
-        print("Nombre capturado:", repr(nombre_cliente))
-
-        # Crear controlador de Excel
+        # --- 2. BLOQUE DE EJECUCIÓN PRINCIPAL ---
         try:
+            aiu_values = self.aiu_manager.get_aiu_values()
+            ruta_proyecto = self.path_input.text()
 
+            # Generar el archivo Excel
             excel_path = self.excel_controller.generate_excel(
                 items=structured_items,
                 activities=structured_items,
@@ -571,107 +616,141 @@ class MainWindow(QMainWindow):
                 imprevistos=aiu_values['imprevistos'],
                 utilidad=aiu_values['utilidad'],
                 iva_utilidad=aiu_values['iva_sobre_utilidad'],
-                nombre_cliente= nombre_cliente
+                nombre_cliente=self.nombre_input.text(),
+                ruta_personalizada=ruta_proyecto
             )
-            if show_message:
-                QMessageBox.information(self, "Éxito", f"Archivo Excel generado en:\n{excel_path}")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"No se pudo generar el Excel: {e}")
-            print(f"Error detallado: {e}")  # Debug
-            import traceback
-            traceback.print_exc()  # Debug
-            return
 
-        return excel_path
+            # 3. AUTOMATIZACIÓN WORD/PDF (Si el excel se creó con éxito)
+            if excel_path and os.path.exists(excel_path):
+                directorio = os.path.dirname(excel_path)
+                nombre_archivo = os.path.splitext(os.path.basename(excel_path))[0]
+
+                # Definimos rutas
+                word_template = os.path.join(os.getcwd(), "plantilla_base.docx")
+                pdf_path = os.path.join(directorio, f"{nombre_archivo}.pdf")
+
+                if not os.path.exists(word_template):
+                    QMessageBox.warning(self, "Plantilla Faltante", f"No se encontró: {word_template}")
+                    return excel_path
+
+                # Feedback visual de carga
+                QApplication.setOverrideCursor(Qt.WaitCursor)
+
+                try:
+                    # Importación y ejecución del script excel_to_word.py
+                    automator = ExcelToWordAutomation()
+                    exito, mensaje = automator.ejecutar_flujo_completo(excel_path, word_template, pdf_path)
+
+                    QApplication.restoreOverrideCursor()
+
+                    if exito:
+                        if show_message:
+                            QMessageBox.information(self, "Éxito",
+                                                    f"Archivos generados correctamente en:\n{directorio}")
+                    else:
+                        QMessageBox.warning(self, "Error Office", f"Excel creado, pero falló Word/PDF: {mensaje}")
+
+                except Exception as e_office:
+                    QApplication.restoreOverrideCursor()
+                    QMessageBox.warning(self, "Error de Automatización",
+                                        f"Error al conectar con Office: {str(e_office)}")
+
+            return excel_path
+
+        except Exception as e:
+            # Restaurar cursor por si acaso ocurrió un error antes de terminar
+            QApplication.restoreOverrideCursor()
+            QMessageBox.critical(self, "Error General", f"No se pudo completar la operación: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
 
     def generate_word(self):
-        """Genera un documento Word con la cotización actual"""
+        """Genera Word y PDF en la misma carpeta del Excel para todos los clientes."""
         try:
-            # Verificar que haya actividades
+            # 1. Validaciones e inicio
             if self.activities_table.rowCount() == 0:
-                QMessageBox.warning(self, "Error", "Debe agregar al menos una actividad a la cotización.")
+                QMessageBox.warning(self, "Error", "Agregue actividades.")
                 return
 
-            # Verificar que haya un cliente seleccionado
-            if self.client_combo.currentIndex() == -1:
-                QMessageBox.warning(self, "Error", "Debe seleccionar un cliente.")
-                return
-
-            # Generar Excel primero (necesario para la imagen)
             excel_path = self.generate_excel(show_message=False)
-            if not excel_path:
-                return
+            if not excel_path: return
 
-            # Obtener datos del cliente directamente de los campos de la interfaz
+            # --- CLAVE: Obtener la ruta de la carpeta donde se guardó el Excel ---
+            target_dir = os.path.dirname(os.path.abspath(excel_path))
             client_type = self.tipo_combo.currentText().lower()
-            client_data = {
-                'tipo': client_type,
-                'nombre': self.nombre_input.text(),
-                'nit': self.nit_input.text(),
-                'direccion': self.direccion_input.text(),
-                'telefono': self.telefono_input.text(),
-                'email': self.email_input.text()
-            }
 
-            # Crear datos precargados para el diálogo
+            # 2. Diálogo de configuración
+            # Pasamos datos de precarga para que los campos no salgan vacíos
+            client_name = self.nombre_input.text()
             precarga_data = {
-                'referencia': f"Cotización para {client_data['nombre']}",
-                'titulo': f"COTIZACIÓN DE SERVICIOS PARA {client_data['nombre'].upper()}",
-                'lugar': client_data['direccion'],
+                'referencia': f"Cotización para {client_name}",
+                'titulo': f"COTIZACIÓN DE SERVICIOS PARA {client_name.upper()}",
+                'lugar': self.direccion_input.text(),
                 'concepto': "Servicios especializados según especificaciones técnicas."
             }
 
-            # Abrir diálogo para configurar documento Word con datos precargados
-            dialog = ImprovedWordConfigDialog(
-                self,
-                client_type=client_type,
-                client_data=client_data,
-                precarga_data=precarga_data
-            )
+            dialog = ImprovedWordConfigDialog(self, client_type=client_type, precarga_data=precarga_data)
 
             if dialog.exec_():
                 config = dialog.get_config()
+                QApplication.setOverrideCursor(Qt.WaitCursor)
 
-                # Crear controlador de Word
-                word_controller = WordController(self.cotizacion_controller)
-
-                # ==========================================
-                # NUEVA LÓGICA: Solo usar plantillas existentes
-                # ==========================================
-
-                # Obtener ID de la cotización (necesitarás ajustar esto según tu lógica)
-                cotizacion_id = self.get_current_cotizacion_id()  # Implementa este método
-
-                # Preparar datos adicionales para el reemplazo de marcadores
-                datos_adicionales = {
-                    'referencia': config.get('referencia', f"Cotización para {client_data['nombre']}"),
-                    'validez': config.get('validez', '30'),
-                    'cuadrillas': config.get('cuadrillas', 'una'),
-                    'operarios': config.get('operarios_num', '2'),
-                    'plazo': config.get('plazo_dias', '15'),
+                # 3. Preparar datos para el WordController
+                datos_para_word = {
+                    'referencia': config.get('referencia'),
+                    'titulo': config.get('titulo'),
+                    'lugar': config.get('lugar'),
+                    'concepto': config.get('concepto'),
+                    'validez': str(config.get('validez', '30')),
+                    'cuadrillas': str(config.get('cuadrillas', '1')),
+                    'operarios': str(config.get('operarios_num', '2')),
+                    'plazo': f"{config.get('plazo_dias')} días {config.get('plazo_tipo')}",
                     'forma_pago': self._determinar_forma_pago(config)
                 }
 
-                # Determinar formato según tipo de cliente y preferencia
-                if config["client_type"] == "natural":
-                    formato = 'corto'  # Siempre corto para personas naturales
-                elif config["client_type"] == "juridica":
-                    # Podrías agregar una opción en el diálogo para elegir formato
-                    formato = 'corto'  # o 'largo' según prefieras por defecto
-                else:
-                    formato = 'auto'  # Deja que el sistema decida
+                word_controller = WordController(self.cotizacion_controller)
+                formato = 'corto' if client_type == "natural" else 'largo'
 
-                # GENERAR DOCUMENTO USANDO SOLO PLANTILLAS EXISTENTES
-                word_path = word_controller.generate_word_document(
-                    cotizacion_id=cotizacion_id,
+                # --- PASO A: Generar el Word base ---
+                # Nota: Asegúrate de que tu WordController acepte una ruta personalizada o
+                # simplemente mueve el archivo después de generado.
+                temp_word_path = word_controller.generate_word_document(
+                    cotizacion_id=self.get_current_cotizacion_id(),
                     excel_path=excel_path,
-                    datos_adicionales=datos_adicionales,
+                    datos_adicionales=datos_para_word,
                     formato=formato
                 )
 
-                QMessageBox.information(self, "Éxito", f"Documento Word generado correctamente en:\n{word_path}")
+                # --- PASO B: Definir rutas finales en la carpeta del Excel ---
+                nombre_base = os.path.basename(temp_word_path)
+                word_final_path = os.path.join(target_dir, nombre_base)
+                pdf_final_path = word_final_path.replace(".docx", ".pdf")
+
+                # Mover el archivo generado por el controlador a la carpeta del Excel si es necesario
+                if temp_word_path != word_final_path:
+                    import shutil
+                    shutil.move(temp_word_path, word_final_path)
+
+                # --- PASO C: Automatización COM (Tabla + PDF) ---
+                automator = ExcelToWordAutomation()
+                exito, mensaje = automator.insertar_tabla_y_convertir_pdf(
+                    excel_path, word_final_path, pdf_final_path
+                )
+
+                QApplication.restoreOverrideCursor()
+
+                if exito:
+                    QMessageBox.information(self, "Éxito",
+                                            f"Archivos guardados en: {target_dir}\n\n"
+                                            f"1. Excel\n2. Word\n3. PDF")
+                else:
+                    QMessageBox.warning(self, "Error Office", f"Error: {mensaje}")
+
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Error al generar el Word: {str(e)}")
+            QApplication.restoreOverrideCursor()
+            QMessageBox.critical(self, "Error", f"Error crítico: {str(e)}")
+
 
     def get_current_cotizacion_id(self):
         """Versión simplificada que usa ID fijo y crea el método obtener_cotizacion si no existe"""
@@ -716,40 +795,68 @@ class MainWindow(QMainWindow):
             return "contraentrega"  # Por defecto
 
     def load_imported_cotizacion_to_ui(self, cotizacion_data):
-        """
-        Carga los datos de una cotización importada en la interfaz de usuario
-
-        Args:
-            cotizacion_data (dict): Datos de la cotización importada
-        """
         try:
-            # Limpiar tabla actual
+            print("\n" + "=" * 50)
+            print("INICIO DE TRACING DE CARGA")
+            print("=" * 50)
+
+            # 1. Limpiar tabla
             self.activities_table.setRowCount(0)
+            print(f"TRACING: Tabla reseteada. Filas actuales: {self.activities_table.rowCount()}")
 
-            # Cargar información del cliente si existe
-            if 'cliente' in cotizacion_data and cotizacion_data['cliente']:
-                cliente = cotizacion_data['cliente']
-                # Aquí puedes actualizar los campos del cliente en tu interfaz
-                # Por ejemplo, si tienes campos como self.client_name, self.client_nit, etc.
+            # 2. CARGAR INFORMACIÓN DEL CLIENTE
+            if 'cliente' in cotizacion_data:
+                self._apply_cliente_to_ui(cotizacion_data['cliente'])
 
-            # Cargar actividades en la tabla
-            if 'table_rows' in cotizacion_data:
-                for row_data in cotizacion_data['table_rows']:
-                    self.add_imported_row_to_table(row_data)
-            elif 'actividades' in cotizacion_data:
-                # Formato anterior por compatibilidad
-                for activity in cotizacion_data['actividades']:
-                    self.add_imported_activity_to_table(activity)
+            # 3. CARGAR ACTIVIDADES
+            acts = cotizacion_data.get('actividades', [])
+            print(f"TRACING: Intentando insertar {len(acts)} actividades...")
 
-            # Actualizar totales y otros cálculos
+            for i, act in enumerate(acts):
+                # Aquí llamamos a tu función existente
+                self.add_imported_activity_to_table(act)
+                # Verificamos si la fila realmente se creó
+                if self.activities_table.rowCount() <= i:
+                    print(f"ALERTA: La actividad {i} no aumentó el rowCount de la tabla!")
+
+            # 4. VALORES AIU
+            if 'aiu_values' in cotizacion_data:
+                aiu = cotizacion_data['aiu_values']
+                if hasattr(self, 'admin_input'): self.admin_input.setValue(float(aiu.get('administracion', 0)))
+                if hasattr(self, 'imprev_input'): self.imprev_input.setValue(float(aiu.get('imprevistos', 0)))
+                if hasattr(self, 'util_input'): self.util_input.setValue(float(aiu.get('utilidad', 0)))
+                print("TRACING: Valores AIU asignados a los SpinBoxes.")
+
             self.calculate_totals()
 
-            print("Datos cargados en la interfaz correctamente")
 
         except Exception as e:
-            print(f"Error cargando datos en la interfaz: {e}")
+            print(f"ERROR EN TRACING: {e}")
             import traceback
             traceback.print_exc()
+
+    def _apply_cliente_to_ui(self, c: dict):
+        if not c:
+            return
+
+        print(f"APPLY_CLIENTE: {c.get('nombre')}")
+
+        self.client_combo.blockSignals(True)
+        self.tipo_combo.blockSignals(True)
+
+        self.nombre_input.setText(str(c.get('nombre', '')))
+        self.nit_input.setText(str(c.get('nit', '')))
+        self.direccion_input.setText(str(c.get('direccion', '')))
+        self.telefono_input.setText(str(c.get('telefono', '')))
+        self.email_input.setText(str(c.get('email', '')))
+
+        tipo = str(c.get('tipo', 'Natural'))
+        idx = self.tipo_combo.findText(tipo, Qt.MatchContains)
+        if idx >= 0:
+            self.tipo_combo.setCurrentIndex(idx)
+
+        self.client_combo.blockSignals(False)
+        self.tipo_combo.blockSignals(False)
 
     def add_imported_row_to_table(self, row_data):
         """
@@ -1139,56 +1246,57 @@ class MainWindow(QMainWindow):
             traceback.print_exc()
 
     def open_file_dialog(self):
-        """Abre el diálogo para seleccionar un archivo de cotización"""
         try:
             dialog = CotizacionFileDialog(self.cotizacion_controller, self)
-            if dialog.exec_():
-                cotizacion_data = dialog.get_selected_cotizacion()
-                if cotizacion_data:
-                    self.load_cotizacion_from_file(cotizacion_data)
+
+            if dialog.exec_() == QDialog.Accepted:
+
+                cotizacion = dialog.selected_cotizacion
+                source = getattr(dialog, "source", None)
+
+                if not cotizacion:
+                    return
+
+                if source == "open":
+                    self.load_cotizacion_from_file(cotizacion)
+
+                elif source == "import":
+                    self.load_imported_cotizacion_to_ui(cotizacion)
+
+                else:
+                    QMessageBox.warning(
+                        self,
+                        "Advertencia",
+                        "No se pudo determinar el origen de la cotización."
+                    )
+
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error al abrir archivo: {str(e)}")
 
     def load_cotizacion_from_file(self, cotizacion_data):
-        """
-        Carga los datos de una cotización desde archivo en la interfaz
-
-        Args:
-            cotizacion_data (dict): Datos completos de la cotización
-        """
         try:
             print("Iniciando carga de cotización desde archivo...")
 
-            # Guardar referencia a los datos importados
             self.selected_cotizacion = cotizacion_data
 
-            # 1. Cargar información del cliente
-            if 'cliente' in cotizacion_data and cotizacion_data['cliente']:
-                cliente = cotizacion_data['cliente']
-                print(f"Cargando cliente: {cliente.get('nombre', 'Sin nombre')}")
+            # 🔒 Flag de carga
+            self.is_loading_cotizacion = True
 
-                # Actualizar campos del cliente en la interfaz si existen
-                if hasattr(self, 'client_name_field'):
-                    self.client_name_field.setText(cliente.get('nombre', ''))
-                if hasattr(self, 'client_nit_field'):
-                    self.client_nit_field.setText(cliente.get('nit', ''))
-                # Agregar más campos según tu interfaz
-
-            # 2. Limpiar tabla actual
+            # 1. LIMPIAR TABLA
             self.activities_table.setRowCount(0)
             print("Tabla limpiada")
 
-            # 3. Cargar actividades en la tabla
+            # 2. CARGAR ACTIVIDADES
             activities_loaded = 0
 
-            if 'table_rows' in cotizacion_data and cotizacion_data['table_rows']:
+            if cotizacion_data.get('table_rows'):
                 print(f"Cargando {len(cotizacion_data['table_rows'])} filas de table_rows")
                 for row_data in cotizacion_data['table_rows']:
                     self.add_imported_row_to_table(row_data)
                     if row_data.get('type') == 'activity':
                         activities_loaded += 1
 
-            elif 'actividades' in cotizacion_data and cotizacion_data['actividades']:
+            elif cotizacion_data.get('actividades'):
                 print(f"Cargando {len(cotizacion_data['actividades'])} actividades")
                 for activity in cotizacion_data['actividades']:
                     self.add_imported_activity_to_table(activity)
@@ -1196,40 +1304,31 @@ class MainWindow(QMainWindow):
 
             print(f"Actividades cargadas en tabla: {activities_loaded}")
 
-            # 4. Cargar valores AIU si existen
-            if 'aiu_values' in cotizacion_data and cotizacion_data['aiu_values']:
+            # 3. AIU
+            if cotizacion_data.get('aiu_values'):
                 try:
-                    # Usar método alternativo si set_aiu_values no existe
                     if hasattr(self.aiu_manager, 'set_aiu_values'):
                         self.aiu_manager.set_aiu_values(cotizacion_data['aiu_values'])
-                    elif hasattr(self.aiu_manager, 'update_from_imported_data'):
-                        self.aiu_manager.update_from_imported_data(cotizacion_data['aiu_values'])
-                    else:
-                        # Método manual para actualizar AIU
-                        aiu_data = cotizacion_data['aiu_values']
-                        print(f"Actualizando AIU manualmente: {aiu_data}")
+                except Exception as e:
+                    print(f"Error cargando AIU: {e}")
 
-                        # Aquí puedes actualizar los campos AIU directamente si conoces sus nombres
-                        # Ejemplo (ajusta según los nombres reales de tus campos):
-                        # if hasattr(self, 'admin_spinbox'):
-                        #     self.admin_spinbox.setValue(float(aiu_data.get('administracion', 0)))
-
-                except Exception as aiu_error:
-                    print(f"Error cargando valores AIU: {aiu_error}")
-                    # Continuar sin AIU si falla
-
-            # 5. Actualizar totales
+            # 4. TOTALES
             if hasattr(self, 'calculate_totals'):
                 self.calculate_totals()
 
-            # 6. Actualizar otros campos si existen
-            if 'fecha' in cotizacion_data and hasattr(self, 'date_field'):
+            # 5. 🔥 APLICAR CLIENTE (AQUÍ Y SOLO AQUÍ)
+            self._apply_cliente_to_ui(cotizacion_data.get("cliente"))
+
+            # 6. FECHA
+            if hasattr(self, 'date_field') and cotizacion_data.get('fecha'):
                 self.date_field.setText(cotizacion_data['fecha'])
 
+            self.is_loading_cotizacion = False
             print("Cotización cargada exitosamente en la interfaz")
             return True
 
         except Exception as e:
+            self.is_loading_cotizacion = False
             print(f"Error cargando cotización en interfaz: {e}")
             import traceback
             traceback.print_exc()
@@ -1446,6 +1545,7 @@ class MainWindow(QMainWindow):
         """Abre la ventana de gestión de datos"""
         try:
             self.data_management_window = DataManagementWindow(self.cotizacion_controller, self)
+            self.data_management_window.chapters_updated.connect(self.refresh_chapters_combo)
             self.data_management_window.closed.connect(self.on_data_management_closed)
             self.data_management_window.show()
         except Exception as e:
@@ -1486,7 +1586,6 @@ class MainWindow(QMainWindow):
             import traceback
             traceback.print_exc()
 
-        # Pega este método dentro de la clase MainWindow en views/main_window.py
 
     def guardar_cliente(self):
         """
@@ -1872,6 +1971,15 @@ class MainWindow(QMainWindow):
             print(f"Error al refrescar el combo de actividades: {e}")
             import traceback
             traceback.print_exc()
+
+    def refresh_chapters_combo(self):
+        """Lógica para recargar el ComboBox de capítulos"""
+        self.chapter_selection_combo.clear()
+        chapters = self.cotizacion_controller.get_all_chapters()
+
+        for ch in chapters:
+            # Estas líneas DEBEN tener una sangría (espacios) extra a la derecha
+            self.chapter_selection_combo.addItem(ch['nombre'], ch['id'])
 
     @pyqtSlot()
     def on_data_management_closed(self):

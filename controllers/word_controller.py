@@ -7,7 +7,6 @@ import os
 import re
 from datetime import datetime
 import calendar
-from PIL import Image
 import io
 import tempfile
 from openpyxl import load_workbook
@@ -20,7 +19,9 @@ from openpyxl.utils import get_column_letter
 class WordController:
     def __init__(self, cotizacion_controller):
         self.cotizacion_controller = cotizacion_controller
-        self.templates_dir = os.path.join(os.getcwd(), 'data', 'templates')
+
+        base_path = os.path.dirname(os.path.abspath(__file__))
+        self.templates_dir = os.path.join(base_path, 'data', 'templates')
 
         # Nombres de plantillas que deben existir en el directorio
         self.template_juridica_larga = os.path.join(self.templates_dir, 'plantilla_juridica_larga.docx')
@@ -79,14 +80,12 @@ class WordController:
         if not os.path.exists(template_path):
             raise FileNotFoundError(f"No se encontró la plantilla: {template_path}")
 
-        # Capturar la tabla de Excel como imagen
-        table_image_path = self._capture_excel_table(excel_path)
 
         # Preparar los datos para reemplazo
         replace_data = self._prepare_replace_data(cotizacion, datos_adicionales)
 
         # Generar el documento
-        output_path = self._generate_document(template_path, replace_data, table_image_path)
+        output_path = self._generate_document(template_path, replace_data)
 
         return output_path
 
@@ -201,53 +200,6 @@ class WordController:
 
         return sample_data
 
-    def _capture_excel_table(self, excel_path):
-        """Captura la tabla de Excel como imagen."""
-        try:
-            wb = load_workbook(excel_path)
-            sheet = wb.active
-
-            max_row = sheet.max_row
-            max_col = sheet.max_column
-
-            fig, ax = plt.subplots(figsize=(12, max_row * 0.4))
-            ax.axis('tight')
-            ax.axis('off')
-
-            data = []
-            for row in range(1, max_row + 1):
-                row_data = []
-                for col in range(1, max_col + 1):
-                    cell_value = sheet.cell(row=row, column=col).value
-                    row_data.append(str(cell_value) if cell_value is not None else "")
-                data.append(row_data)
-
-            table = ax.table(cellText=data,
-                             colLabels=None,
-                             cellLoc='center',
-                             loc='center',
-                             colWidths=[0.1, 0.4, 0.1, 0.1, 0.15, 0.15])
-
-            table.auto_set_font_size(False)
-            table.set_fontsize(10)
-            table.scale(1, 1.5)
-
-            for (row, col), cell in table.get_celld().items():
-                if row == 0:
-                    cell.set_text_props(fontweight='bold')
-                    cell.set_facecolor('#008000')
-                    cell.set_text_props(color='white')
-
-            temp_image_path = os.path.join(tempfile.gettempdir(),
-                                           f"tabla_cotizacion_{datetime.now().strftime('%Y%m%d%H%M%S')}.png")
-            plt.savefig(temp_image_path, bbox_inches='tight', dpi=300)
-            plt.close()
-
-            return temp_image_path
-
-        except Exception as e:
-            print(f"Error al capturar la tabla de Excel: {e}")
-            return None
 
     def _prepare_replace_data(self, cotizacion, datos_adicionales):
         """Prepara los datos para reemplazar en la plantilla."""
@@ -285,7 +237,7 @@ class WordController:
 
         return replace_data
 
-    def _generate_document(self, template_path, replace_data, table_image_path):
+    def _generate_document(self, template_path, replace_data):
         """
         Genera el documento Word reemplazando los marcadores.
         """
@@ -300,13 +252,6 @@ class WordController:
                     if marker in paragraph.text:
                         self._replace_text_in_paragraph(paragraph, marker, str(value))
 
-                # Reemplazar marcador de tabla con imagen
-                if '{{tabla_cotizacion}}' in paragraph.text:
-                    paragraph.text = paragraph.text.replace('{{tabla_cotizacion}}', '')
-
-                    if table_image_path and os.path.exists(table_image_path):
-                        run = paragraph.add_run()
-                        run.add_picture(table_image_path, width=Inches(6))
 
             # Reemplazar marcadores en tablas
             for table in doc.tables:
@@ -344,13 +289,6 @@ class WordController:
 
             doc.save(output_path)
 
-            # Limpiar imagen temporal
-            if table_image_path and os.path.exists(table_image_path):
-                try:
-                    os.remove(table_image_path)
-                except:
-                    pass
-
             return output_path
 
         except Exception as e:
@@ -358,8 +296,18 @@ class WordController:
             raise
 
     def _replace_text_in_paragraph(self, paragraph, marker, text):
-        """Reemplaza un marcador en un párrafo manteniendo el formato."""
+        """Reemplaza el marcador manteniendo el texto estático y el formato de la plantilla."""
         if marker in paragraph.text:
+            # Buscamos el marcador en todo el texto del párrafo
+            # Si el marcador está repartido en varios 'runs', este bucle lo unifica
             for run in paragraph.runs:
                 if marker in run.text:
-                    run.text = run.text.replace(marker, text)
+                    # Caso simple: el marcador está en un solo bloque
+                    run.text = run.text.replace(marker, str(text))
+                else:
+                    # Caso complejo: el marcador está dividido.
+                    # Forzamos el reemplazo en el contenido del párrafo
+                    # pero python-docx intentará mantener el estilo base del párrafo.
+                    full_text = paragraph.text.replace(marker, str(text))
+                    paragraph.text = full_text
+                    break

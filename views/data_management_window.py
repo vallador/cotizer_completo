@@ -9,6 +9,7 @@ from utils.filter_manager import FilterManager
 class DataManagementWindow(QMainWindow):
     # Señal para notificar cuando se cierra la ventana
     closed = pyqtSignal()
+    chapters_updated = pyqtSignal()
     
     def __init__(self, controller, parent=None):
         super().__init__(parent)
@@ -1172,6 +1173,13 @@ class DataManagementWindow(QMainWindow):
             reply = QMessageBox.question(self, "Confirmar Eliminación",
                                          f"¿Está seguro de que desea eliminar el capítulo con ID {chapter_id}?",
                                          QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply == QMessageBox.Yes:
+                self.controller.delete_chapter(chapter_id)
+
+                # Emites la señal aquí también
+                self.chapters_updated.emit()
+
+                self.refresh_chapters_table()
 
 
             if reply == QMessageBox.Yes:
@@ -1234,6 +1242,9 @@ class DataManagementWindow(QMainWindow):
                 QMessageBox.information(self, "Éxito", "Capítulo agregado correctamente.")
 
             # --- PASO 4: Refrescar y limpiar (común a ambos casos) ---
+            self.chapters_updated.emit()
+            QMessageBox.information(self, "Éxito", "Capítulo guardado correctamente.")
+
             self.refresh_chapters_table()
             self.clear_chapter_form()
 
