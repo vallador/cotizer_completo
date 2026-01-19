@@ -87,17 +87,7 @@ Entorno desarrollado con precisión y eficiencia:
 
 ---
 
-## 🤝 Contribuciones
 
-¿Quieres mejorar QuotationMaster Pro? Las contribuciones son bienvenidas:
-
-1. Realiza un **Fork** del proyecto.
-2. Crea una **Rama** para tu funcionalidad (`git checkout -b feature/NuevaMejora`).
-3. Haz un **Commit** de tus cambios (`git commit -m 'Add: Nueva mejora visual'`).
-4. Haz un **Push** a la rama (`git push origin feature/NuevaMejora`).
-5. Abre un **Pull Request**.
-
----
 
 ## 📄 Licencia
 
