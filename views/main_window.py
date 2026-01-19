@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import QMainWindow, QCheckBox, QDialog, QPushButton, QLabel, QLineEdit, QComboBox, QTableWidget, \
     QTableWidgetItem, QMessageBox, QWidget, QDoubleSpinBox, QHeaderView, QTextEdit, QFileDialog, QSplitter,\
-    QGridLayout, QApplication, QVBoxLayout, QHBoxLayout, QAbstractItemView, QGroupBox,QFormLayout
-from PyQt5.QtCore import Qt, pyqtSlot, QMimeData, QByteArray
+    QGridLayout, QApplication, QVBoxLayout, QHBoxLayout, QAbstractItemView, QGroupBox,QFormLayout,QScrollArea, QStyledItemDelegate
+from PyQt5.QtCore import Qt, pyqtSlot, QMimeData, QByteArray, QEvent
 from PyQt5.QtGui import QPalette, QColor, QDrag, QFont, QPixmap
 import os
 from datetime import datetime
@@ -10,7 +10,36 @@ from views.data_management_window import DataManagementWindow
 from views.email_dialog import SendEmailDialog
 from views.word_dialog import ImprovedWordConfigDialog
 from views.cotizacion_file_dialog import CotizacionFileDialog
+from views.dashboard_window import DashboardWindow
 from utils.excel_to_word import ExcelToWordAutomation
+
+class MultiLineDelegate(QStyledItemDelegate):
+    """Delegado para permitir edición multilínea en celdas de la tabla."""
+    def createEditor(self, parent, option, index):
+        editor = QTextEdit(parent)
+        editor.setAcceptRichText(False)  # Solo texto plano
+        return editor
+
+    def setEditorData(self, editor, index):
+        text = index.model().data(index, Qt.EditRole)
+        editor.setPlainText(text)
+
+    def setModelData(self, editor, model, index):
+        model.setData(index, editor.toPlainText(), Qt.EditRole)
+
+    def eventFilter(self, editor, event):
+        # Permitir que Enter agregue una nueva línea, pero Ctrl+Enter o Shift+Enter cierre el editor si se desea
+        # Por defecto, Tab cambia de celda, pero Enter hace nueva línea en QTextEdit.
+        # Si queremos que Enter termine la edición, tendríamos que capturarlo.
+        # Aquí dejaremos el comportamiento estándar de QTextEdit (Enter = nueva línea)
+        # y para salir hay que hacer click fuera o presionar Tab/Ctrl+Enter
+        if event.type() == QEvent.KeyPress:
+             if event.key() == Qt.Key_Tab:
+                 self.commitData.emit(editor)
+                 self.closeEditor.emit(editor)
+                 return True
+        return super().eventFilter(editor, event)
+
 
 class EditableTableWidgetItem(QTableWidgetItem):
     """Un QTableWidgetItem que se asegura de que los valores numéricos se traten como texto."""
@@ -42,10 +71,10 @@ class DraggableTableWidget(QTableWidget):
             if self.drag_row_index < 0:
                 return
 
-            # No permitir arrastrar filas de capítulo
-            first_item = self.item(self.drag_row_index, 0)
-            if first_item and first_item.data(Qt.UserRole) and first_item.data(Qt.UserRole).get('type') == 'chapter':
-                return
+            # Se permite arrastrar filas de capítulo ahora
+            # first_item = self.item(self.drag_row_index, 0)
+            # if first_item and first_item.data(Qt.UserRole) and first_item.data(Qt.UserRole).get('type') == 'chapter':
+            #     return
 
             self.drag_row_data = []
             # Guardar los datos de la fila que se está arrastrando
@@ -53,7 +82,16 @@ class DraggableTableWidget(QTableWidget):
                 item = self.item(self.drag_row_index, col)
                 # Guardamos el texto y cualquier otro dato relevante (como UserRole)
                 if item:
-                    self.drag_row_data.append({'text': item.text(), 'data': item.data(Qt.UserRole)})
+                    item_info = {
+                        'text': item.text(),
+                        'data': item.data(Qt.UserRole),
+                        'flags': item.flags(),
+                        'font': item.font(),
+                        'background': item.background(),
+                        'foreground': item.foreground(),
+                        'text_alignment': item.textAlignment()
+                    }
+                    self.drag_row_data.append(item_info)
                 else:
                     self.drag_row_data.append(None)
 
@@ -130,8 +168,45 @@ class DraggableTableWidget(QTableWidget):
         self.insertRow(drop_row)
         for col, item_data in enumerate(self.drag_row_data):
             if item_data:
-                new_item = QTableWidgetItem(item_data['text'])
-                new_item.setData(Qt.UserRole, item_data['data'])  # Restauramos los datos de rol
+                # Recuperar propiedades
+                text = item_data['text']
+                data = item_data['data']
+                flags = item_data.get('flags')
+                font = item_data.get('font')
+                background = item_data.get('background')
+                foreground = item_data.get('foreground')
+                text_alignment = item_data.get('text_alignment')
+                
+                # Intentar mantener la clase original si es posible, sino usar EditableTableWidgetItem o QTableWidgetItem
+                # Sin embargo, dado que solo serializamos datos basicos, recrearemos items apropiados
+                # Si es un capítulo (col 0 y tiene data type chapter), usamos QTableWidgetItem estándar restringido
+                # Si es una celda editable numérica, usamos EditableTableWidgetItem
+                
+                is_chapter = False
+                if data and isinstance(data, dict) and data.get('type') == 'chapter':
+                    is_chapter = True
+                
+                if is_chapter and col == 0:
+                     new_item = QTableWidgetItem(text)
+                elif col == 4: # Total column, always read only
+                     new_item = EditableTableWidgetItem(text, editable=False)
+                else:
+                     # Por defecto intentamos que sea editable, los flags corregirán si no lo es
+                     new_item = EditableTableWidgetItem(text, editable=True)
+
+                new_item.setData(Qt.UserRole, data)
+                
+                if flags is not None:
+                    new_item.setFlags(flags)
+                if font:
+                    new_item.setFont(font)
+                if background:
+                    new_item.setBackground(background)
+                if foreground:
+                    new_item.setForeground(foreground)
+                if text_alignment:
+                    new_item.setTextAlignment(text_alignment)
+                
                 self.setItem(drop_row, col, new_item)
 
         # Seleccionar la fila que acabamos de mover
@@ -159,8 +234,35 @@ class DraggableTableWidget(QTableWidget):
         header_item.setForeground(QColor("white"))
         self.setSpan(row, 0, 1, self.columnCount())
         self.setItem(row, 0, header_item)
-        # Hacemos que la fila de capítulo no se pueda seleccionar, editar ni arrastrar.
-        header_item.setFlags(header_item.flags() & ~Qt.ItemIsSelectable & ~Qt.ItemIsEditable & ~Qt.ItemIsDragEnabled)
+        # Hacemos que la fila de capítulo sea seleccionable para permitir arrastre, 
+        # pero mantenemos no editable.
+        header_item.setFlags(header_item.flags() & ~Qt.ItemIsEditable)
+
+    def contextMenuEvent(self, event):
+        """Menú contextual para eliminar filas (útil para encabezados)."""
+        from PyQt5.QtWidgets import QMenu, QAction
+        menu = QMenu(self)
+        delete_action = QAction("Eliminar Fila", self)
+        
+        # Mapear la acción al método de borrado
+        # Necesitamos saber qué fila está bajo el cursor o seleccionada
+        row = self.rowAt(event.pos().y())
+        
+        action = menu.exec_(self.mapToGlobal(event.pos()))
+        
+        if action == delete_action and row >= 0:
+            # Preguntar confirmación
+            from PyQt5.QtWidgets import QMessageBox
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Question)
+            msg.setText("¿Seguro que desea eliminar esta fila?")
+            msg.setInformativeText("Esta acción no se puede deshacer.")
+            msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            if msg.exec_() == QMessageBox.Yes:
+                self.removeRow(row)
+                # Actualizar totales si es necesario
+                if hasattr(self.parent(), "update_totals"):
+                    self.parent().update_totals()
 
 
 class MainWindow(QMainWindow):
@@ -173,9 +275,16 @@ class MainWindow(QMainWindow):
         self.aiu_manager = self.cotizacion_controller.aiu_manager
         # Variable para almacenar la ruta del logo
         self.RUTA_LOGO_ESTATICO = "ING_INT_LOG.png"
+        
+        # Dashboard tracking
+        self.current_quotation_id = None  # Track current loaded quotation
+        self.last_generated_pdf = None  # Track last generated PDF for email
 
         self.setWindowTitle("Sistema de Cotizaciones")
         self.setGeometry(100, 100, 1300, 850)
+        
+        # Add Menu Bar
+        self.create_menu_bar()
 
 
         central_widget = QWidget()
@@ -187,12 +296,13 @@ class MainWindow(QMainWindow):
 
         # 1. Grupo de Información del Cliente (Izquierda)
         client_group = QGroupBox("Información del Cliente")
+        client_group.setMaximumHeight(250)
         client_main_layout = QVBoxLayout(client_group)
 
         client_selection_layout = QHBoxLayout()
         client_selection_layout.addWidget(QLabel("Cliente Existente:"))
         self.client_combo = QComboBox();
-        self.client_combo.setMinimumWidth(300)
+        self.client_combo.setMinimumWidth(600)
         self.client_combo.currentIndexChanged.connect(self.actualizar_datos_cliente)
         client_selection_layout.addWidget(self.client_combo)
         manage_data_btn = QPushButton("Gestionar Datos");
@@ -213,25 +323,27 @@ class MainWindow(QMainWindow):
         client_form_layout.addWidget(self.tipo_combo, 0, 1)
         client_form_layout.addWidget(QLabel("NIT/CC:"), 0, 2);
         client_form_layout.addWidget(self.nit_input, 0, 3)
-        client_form_layout.addWidget(QLabel("Nombre:"), 1, 0);
-        client_form_layout.addWidget(self.nombre_input, 1, 1)
-        client_form_layout.addWidget(QLabel("Teléfono:"), 1, 2);
-        client_form_layout.addWidget(self.telefono_input, 1, 3)
-        client_form_layout.addWidget(QLabel("Dirección:"), 2, 0);
-        client_form_layout.addWidget(self.direccion_input, 2, 1)
-        client_form_layout.addWidget(QLabel("Email:"), 2, 2);
-        client_form_layout.addWidget(self.email_input, 2, 3)
-        client_form_layout.setColumnStretch(4, 1)
+        client_form_layout.addWidget(QLabel("Nombre:"), 0, 4);
+        client_form_layout.addWidget(self.nombre_input, 0, 5)
+        self.nombre_input.setMaximumWidth(500)
+        client_form_layout.addWidget(QLabel("Teléfono:"), 1, 0);
+        client_form_layout.addWidget(self.telefono_input, 1, 1)
+        client_form_layout.addWidget(QLabel("Dirección:"), 1, 2);
+        client_form_layout.addWidget(self.direccion_input, 1, 3)
+        client_form_layout.addWidget(QLabel("Email:"), 1, 4);
+        client_form_layout.addWidget(self.email_input, 1, 5)
+        client_form_layout.setColumnStretch(5, 1)
         client_main_layout.addLayout(client_form_layout)
 
         save_client_btn = QPushButton("Guardar Cliente");
         save_client_btn.clicked.connect(self.guardar_cliente)
         client_main_layout.addWidget(save_client_btn, 0, Qt.AlignLeft)
 
-        main_layout.addWidget(client_group)
+
 
         # 2. Grupo de Destino del Proyecto (Derecha)
         project_group = QGroupBox("Ubicación del Proyecto")
+        project_group.setMaximumHeight(250)
         project_layout = QVBoxLayout(project_group)
 
         # Logo Estático (Se muestra siempre arriba a la derecha)
@@ -262,9 +374,7 @@ class MainWindow(QMainWindow):
         path_layout.addWidget(btn_folder)
         project_layout.addLayout(path_layout)
 
-        # Opción de carpeta existente
-        self.check_existente = QCheckBox("La carpeta ya existe (usar para esta cotización)")
-        project_layout.addWidget(self.check_existente)
+
 
         # Botón para verificar archivos
         btn_ver_carpeta = QPushButton("Abrir Carpeta del Proyecto")
@@ -275,7 +385,7 @@ class MainWindow(QMainWindow):
         top_layout.addWidget(client_group, 65)  # 65% de ancho
         top_layout.addWidget(project_group, 35)  # 35% de ancho
 
-        main_layout.addLayout(top_layout)
+        main_layout.addLayout(top_layout, 0)
 
         ### -----------------------------------------------------------------------------------------
         ### 4. SECCIÓN CENTRAL: DIVISOR (SPLITTER)
@@ -286,13 +396,19 @@ class MainWindow(QMainWindow):
         # --- 4.1 PANEL IZQUIERDO: TABLA DE COTIZACIÓN Y TOTALES ---
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
-        left_layout.addWidget(QLabel("Detalle de la Cotización", styleSheet="font-size: 16px; font-weight: bold;"))
+        left_layout.addWidget(QLabel("Detalle de la Cotización", styleSheet="font-size: 15px; font-weight: bold;"))
 
         self.activities_table = DraggableTableWidget(0, 6)
+        self.activities_table.setWordWrap(True)
+        self.activities_table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.activities_table.setHorizontalHeaderLabels(
             ["Descripción", "Cantidad", "Unidad", "Valor Unitario", "Total", "Acción"])
         self.activities_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.activities_table.itemChanged.connect(self.on_item_changed)
+        
+        # Asignar el delegado multilínea a la columna de Descripción (índice 0)
+        self.activities_table.setItemDelegateForColumn(0, MultiLineDelegate(self.activities_table))
+        
         left_layout.addWidget(self.activities_table)
 
         totals_layout = QHBoxLayout()
@@ -310,8 +426,13 @@ class MainWindow(QMainWindow):
         main_splitter.addWidget(left_panel)
 
         # --- 4.2 PANEL DERECHO: HERRAMIENTAS DE SELECCIÓN ---
-        right_panel = QWidget()
-        right_layout = QVBoxLayout(right_panel)
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)  # Importante para que el contenido se adapte
+        scroll_area.setMinimumWidth(380)  # Evita que el panel se haga demasiado flaco
+
+        right_panel_content = QWidget()
+        right_layout = QVBoxLayout(right_panel_content)  # El layout va sobre este widget
+
         right_layout.addWidget(QLabel("Herramientas", styleSheet="font-size: 16px; font-weight: bold;"))
 
         # Grupo para Capítulos
@@ -337,7 +458,7 @@ class MainWindow(QMainWindow):
         self.activity_combo.currentIndexChanged.connect(self.update_related_activities)
         self.activity_description = QTextEdit();
         self.activity_description.setReadOnly(True);
-        self.activity_description.setMaximumHeight(60)
+        self.activity_description.setMaximumHeight(100)
         self.related_activities_combo = QComboBox()
         self.pred_quantity_spinbox = QDoubleSpinBox();
         self.pred_quantity_spinbox.setRange(0.01, 9999.99);
@@ -386,23 +507,39 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(manual_group)
 
         right_layout.addStretch()
-        main_splitter.addWidget(right_panel)
+        scroll_area.setWidget(right_panel_content)
+        main_splitter.addWidget(scroll_area)  # Agregamos el scroll al splitter en vez del panel
 
-        main_splitter.setSizes([800, 500])
-        main_layout.addWidget(main_splitter)
+        # --- 4.3 PROPORCIONES FINALES ---
+        main_splitter.setStretchFactor(0, 1)  # La tabla (izquierda)
+        main_splitter.setStretchFactor(1, 0)  # El scroll (derecha) - 0 significa que intente mantener su tamaño
+        main_splitter.setSizes([900, 400])  # Tamaño inicial sugerido
+
+        main_layout.addWidget(main_splitter, 1)
 
         ### -----------------------------------------------------------------------------------------
         ### 5. SECCIÓN INFERIOR: BOTONES DE ACCIÓN
         ### -----------------------------------------------------------------------------------------
         actions_layout = QHBoxLayout()
+        
+        # Checkbox for test quotations
+        self.es_prueba_check = QCheckBox("🧪 Marcar como Cotización de Prueba")
+        self.es_prueba_check.setStyleSheet("font-weight: bold; color: #1976D2;")
+        self.es_prueba_check.setToolTip("Las cotizaciones de prueba no afectan las estadísticas del dashboard")
+        
         save_file_btn = QPushButton("Guardar como Archivo");
         save_file_btn.clicked.connect(self.save_as_file)
         open_file_btn = QPushButton("Abrir Archivo");
         open_file_btn.clicked.connect(self.open_file_dialog)
-        generate_excel_btn = QPushButton("Generar Excel");
-        generate_excel_btn.clicked.connect(self.generate_excel)
-        generate_word_btn = QPushButton("Generar Word");
-        generate_word_btn.clicked.connect(self.generate_word)
+        # BOTONES RESTRINGIDOS (Inician en False)
+        self.generate_excel_btn = QPushButton("Generar Excel")
+        self.generate_excel_btn.setEnabled(False)
+        self.generate_excel_btn.clicked.connect(self.generate_excel)
+
+        self.generate_word_btn = QPushButton("Generar Word")
+        self.generate_word_btn.setEnabled(False)
+        self.generate_word_btn.clicked.connect(self.generate_word)
+
         send_email_btn = QPushButton("Enviar por Correo");
         send_email_btn.clicked.connect(self.send_email)
         clear_btn = QPushButton("Limpiar");
@@ -410,12 +547,13 @@ class MainWindow(QMainWindow):
         self.theme_btn = QPushButton("Modo Oscuro");
         self.theme_btn.clicked.connect(self.toggle_theme)
 
+        actions_layout.addWidget(self.es_prueba_check)
         actions_layout.addWidget(save_file_btn);
         actions_layout.addWidget(open_file_btn)
-        actions_layout.addWidget(generate_excel_btn);
-        actions_layout.addWidget(generate_word_btn)
-        actions_layout.addWidget(send_email_btn);
         actions_layout.addWidget(clear_btn)
+        actions_layout.addWidget(self.generate_excel_btn)
+        actions_layout.addWidget(self.generate_word_btn)
+        actions_layout.addWidget(send_email_btn);
         actions_layout.addStretch();
         actions_layout.addWidget(self.theme_btn)
         main_layout.addLayout(actions_layout)
@@ -425,15 +563,215 @@ class MainWindow(QMainWindow):
         ### -----------------------------------------------------------------------------------------
         self.dark_mode = False
         self.load_initial_data()
-
+    
+    def create_menu_bar(self):
+        """Creates the menu bar with Dashboard option"""
+        menubar = self.menuBar()
+        
+        # Dashboard Menu
+        dashboard_menu = menubar.addMenu('&Dashboard')
+        
+        open_dashboard_action = dashboard_menu.addAction('📊 Abrir Dashboard')
+        open_dashboard_action.triggered.connect(self.open_dashboard)
+        
+        dashboard_menu.addSeparator()
+        
+        historial_action = dashboard_menu.addAction('📜 Ver Historial')
+        historial_action.setEnabled(False)  # To be implemented later
+        
+    def open_dashboard(self):
+        """Opens the dashboard window"""
+        try:
+            db_manager = self.cotizacion_controller.database_manager
+            dashboard = DashboardWindow(db_manager, self)
+            dashboard.exec_()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error al abrir dashboard: {e}")
+            print(f"Error opening dashboard: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def save_quotation_to_db(self, **kwargs):
+        """
+        Saves the current quotation to database with full snapshot.
+        
+        Expected kwargs:
+            - cliente_id, nombre_proyecto, monto_total, es_prueba
+            - ruta_pdf, ruta_excel, ruta_word
+            - config (optional)
+        """
+        try:
+            db = self.cotizacion_controller.database_manager
+            
+            # Save quotation record
+            quotation_id = db.save_quotation(**kwargs)
+            
+            if quotation_id:
+                # Create snapshot
+                datos_dict = {
+                    'cliente': self.get_cliente_data(),
+                    'aiu': self.aiu_manager.get_aiu_values(),
+                    'tipo_cliente': self.tipo_combo.currentText()
+                }
+                
+                table_rows_list = self.serialize_table_rows()
+                config_dict = kwargs.get('config', {})
+                
+                db.save_snapshot(quotation_id, datos_dict, table_rows_list, config_dict)
+                
+                # Add to history
+                db.add_quotation_history(
+                    quotation_id,
+                    accion='creada',
+                    notas='Cotización generada desde la aplicación'
+                )
+                
+                print(f"✓ Cotización guardada con ID: {quotation_id}")
+                self.current_quotation_id = quotation_id
+                return quotation_id
+            
+        except Exception as e:
+            print(f"Error saving quotation: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def get_cliente_data(self):
+        """Gets current client data from UI"""
+        return {
+            'tipo': self.tipo_combo.currentText(),
+            'nombre': self.nombre_input.text(),
+            'nit': self.nit_input.text(),
+            'direccion': self.direccion_input.text(),
+            'telefono': self.telefono_input.text(),
+            'email': self.email_input.text()
+        }
+    
+    def serialize_table_rows(self):
+        """Serializes the activities table to a list for snapshot"""
+        rows = []
+        for row in range(self.activities_table.rowCount()):
+            item = self.activities_table.item(row, 0)
+            if not item:
+                continue
+                
+            user_data = item.data(Qt.UserRole)
+            if not user_data:
+                continue
+            
+            if user_data.get('type') == 'chapter':
+                rows.append({
+                    'type': 'chapter',
+                    'name': item.text()
+                })
+            elif user_data.get('type') == 'activity':
+                rows.append({
+                    'type': 'activity',
+                    'descripcion': item.text(),
+                    'cantidad': float(self.activities_table.item(row, 1).text()) if self.activities_table.item(row, 1) else 0,
+                    'unidad': self.activities_table.item(row, 2).text() if self.activities_table.item(row, 2) else '',
+                    'valor_unitario': float(self.activities_table.item(row, 3).text()) if self.activities_table.item(row, 3) else 0
+                })
+        
+        return rows
+    
+    def load_quotation_from_snapshot(self, snapshot, as_new=False):
+        """
+        Loads a quotation from a snapshot into the UI.
+        
+        Args:
+            snapshot (dict): Snapshot data from database
+            as_new (bool): If True, treats as new quotation (duplicate)
+        """
+        try:
+            # Clear current form
+            self.activities_table.setRowCount(0)
+            
+            # Load client data
+            if 'datos' in snapshot and 'cliente' in snapshot['datos']:
+                cliente = snapshot['datos']['cliente']
+                self.tipo_combo.setCurrentText(cliente.get('tipo', 'Natural'))
+                self.nombre_input.setText(cliente.get('nombre', ''))
+                self.nit_input.setText(cliente.get('nit', ''))
+                self.direccion_input.setText(cliente.get('direccion', ''))
+                self.telefono_input.setText(cliente.get('telefono', ''))
+                self.email_input.setText(cliente.get('email', ''))
+            
+            # Load table rows
+            if 'table_rows' in snapshot:
+                for row_data in snapshot['table_rows']:
+                    if row_data['type'] == 'chapter':
+                        # Find chapter ID by name (if exists in DB)
+                        chapters = self.cotizacion_controller.get_all_chapters()
+                        chapter_id = next((c['id'] for c in chapters if c['nombre'] == row_data['name']), None)
+                        if chapter_id:
+                            self.activities_table.insert_chapter_header(chapter_id, row_data['name'])
+                    elif row_data['type'] == 'activity':
+                        self.add_activity_to_table(
+                            row_data['descripcion'],
+                            row_data['cantidad'],
+                            row_data['unidad'],
+                            row_data['valor_unitario']
+                        )
+            
+            # Load AIU values
+            if 'datos' in snapshot and 'aiu' in snapshot['datos']:
+                aiu = snapshot['datos']['aiu']
+                # AIU values are managed by aiu_manager, would need to update if there's UI for it
+            
+            # Update totals
+            self.update_totals()
+            
+            # Set quotation ID if not duplicate
+            if not as_new:
+                # quotation_id would need to be passed separately or stored in snapshot
+                pass
+            else:
+                self.current_quotation_id = None
+            
+            QMessageBox.information(self, "Éxito", "Cotización cargada correctamente.")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error al cargar cotización: {e}")
+            print(f"Error loading quotation: {e}")
+            import traceback
+            traceback.print_exc()
 
     def definir_ruta_proyecto(self):
-        """Abre el diálogo para que el usuario elija la carpeta del proyecto."""
-        folder = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta de Guardado para el Proyecto")
+        """Abre el diálogo para seleccionar carpeta y activa los botones de generación."""
+        folder = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta de Guardado")
+
         if folder:
+            # 1. Actualizar la interfaz visual
             self.path_input.setText(folder)
-            # Guardamos la ruta en el controlador para que Generar Excel la use
-            self.cotizacion_controller.ruta_destino_archivos = folder
+
+            # 2. Guardar en el controlador (para tus procesos internos)
+            if hasattr(self, 'cotizacion_controller'):
+                self.cotizacion_controller.ruta_destino_archivos = folder
+
+            # 3. ACTIVAR LOS BOTONES (Llama a la validación)
+            self.validar_ruta_proyecto()
+
+
+    def validar_ruta_proyecto(self):
+        """Verifica si la ruta en el input es válida y existe."""
+        ruta = self.path_input.text().strip()
+        # Verificamos que no esté vacío y que la carpeta exista físicamente
+        es_valida = os.path.isdir(ruta)
+
+        # Habilitar o deshabilitar visualmente
+        self.generate_excel_btn.setEnabled(es_valida)
+        self.generate_word_btn.setEnabled(es_valida)
+
+        # Opcional: Cambiar el estilo para que el usuario note por qué está bloqueado
+        if not es_valida:
+            self.path_input.setStyleSheet("border: 1px solid red;")
+            self.path_input.setToolTip("Debe seleccionar una carpeta válida para generar documentos.")
+        else:
+            self.path_input.setStyleSheet("")
+            self.path_input.setToolTip("Ruta lista para guardar archivos.")
+
+
 
     def abrir_explorador(self):
         """Abre la carpeta de destino en Windows para ver los archivos generados."""
@@ -490,6 +828,7 @@ class MainWindow(QMainWindow):
         self.activities_table.insertRow(row)
         desc_item = EditableTableWidgetItem(descripcion)
         desc_item.setData(Qt.UserRole, {'type': 'activity'})
+
         self.activities_table.setItem(row, 0, desc_item)
         self.activities_table.setItem(row, 1, EditableTableWidgetItem(cantidad))
         self.activities_table.setItem(row, 2, EditableTableWidgetItem(unidad))
@@ -561,6 +900,12 @@ class MainWindow(QMainWindow):
         self.total_label.setText(f"${total:,.2f}")
 
     def generate_excel(self, show_message=True):
+        # VALIDACIÓN DE SEGURIDAD
+        ruta_proyecto = self.path_input.text().strip()
+        if not os.path.isdir(ruta_proyecto):
+            QMessageBox.warning(self, "Error de Ubicación",
+                                "La ruta de destino no es válida. Seleccione una carpeta primero.")
+            return None
         """Prepara los datos, genera el Excel y luego automatiza Word y PDF."""
         structured_items = []
 
@@ -620,40 +965,50 @@ class MainWindow(QMainWindow):
                 ruta_personalizada=ruta_proyecto
             )
 
-            # 3. AUTOMATIZACIÓN WORD/PDF (Si el excel se creó con éxito)
+            # 3. AUTOMATIZACIÓN WORD/PDF (Solo para clientes Jurídicos)
             if excel_path and os.path.exists(excel_path):
-                directorio = os.path.dirname(excel_path)
-                nombre_archivo = os.path.splitext(os.path.basename(excel_path))[0]
+                tipo_cliente_principal = self.tipo_combo.currentText().lower().strip()
 
-                # Definimos rutas
-                word_template = os.path.join(os.getcwd(), "plantilla_base.docx")
-                pdf_path = os.path.join(directorio, f"{nombre_archivo}.pdf")
+                if tipo_cliente_principal in ["juridica", "jurídica"]:
+                    directorio = os.path.dirname(excel_path)
+                    nombre_archivo = os.path.splitext(os.path.basename(excel_path))[0]
 
-                if not os.path.exists(word_template):
-                    QMessageBox.warning(self, "Plantilla Faltante", f"No se encontró: {word_template}")
-                    return excel_path
+                    # Definimos rutas específicas para el flujo Office
+                    word_template = os.path.join(os.getcwd(), "plantilla_base.docx")
+                    pdf_path = os.path.join(directorio, f"juridico_{nombre_archivo}.pdf")
 
-                # Feedback visual de carga
-                QApplication.setOverrideCursor(Qt.WaitCursor)
+                    # Verificación de seguridad antes de iniciar Office
+                    if not os.path.exists(word_template):
+                        QMessageBox.warning(self, "Plantilla Faltante",
+                                            f"No se encontró la plantilla base: {word_template}")
+                        return excel_path
 
-                try:
-                    # Importación y ejecución del script excel_to_word.py
-                    automator = ExcelToWordAutomation()
-                    exito, mensaje = automator.ejecutar_flujo_completo(excel_path, word_template, pdf_path)
+                    # Iniciamos la automatización pesada
+                    QApplication.setOverrideCursor(Qt.WaitCursor)
+                    try:
+                        # Solo instanciamos y ejecutamos si es jurídico
+                        automator = ExcelToWordAutomation()
+                        exito, mensaje = automator.ejecutar_flujo_completo(excel_path, word_template, pdf_path)
 
-                    QApplication.restoreOverrideCursor()
+                        QApplication.restoreOverrideCursor()
 
-                    if exito:
-                        if show_message:
-                            QMessageBox.information(self, "Éxito",
-                                                    f"Archivos generados correctamente en:\n{directorio}")
-                    else:
-                        QMessageBox.warning(self, "Error Office", f"Excel creado, pero falló Word/PDF: {mensaje}")
+                        if exito:
+                            if show_message:
+                                QMessageBox.information(self, "Éxito",
+                                                        f"Archivos generados correctamente en:\n{directorio}")
+                        else:
+                            QMessageBox.warning(self, "Error Office", f"Excel creado, pero falló Word/PDF: {mensaje}")
 
-                except Exception as e_office:
-                    QApplication.restoreOverrideCursor()
-                    QMessageBox.warning(self, "Error de Automatización",
-                                        f"Error al conectar con Office: {str(e_office)}")
+                    except Exception as e_office:
+                        QApplication.restoreOverrideCursor()
+                        QMessageBox.warning(self, "Error de Automatización",
+                                            f"Error al conectar con Office: {str(e_office)}")
+                else:
+                    # Si es Natural, simplemente terminamos el proceso tras el Excel
+                    if show_message:
+                        QMessageBox.information(self, "Excel Generado",
+                                                "La cotización para Persona Natural se ha generado en Excel con éxito.")
+                    print("Cliente Natural detectado: Proceso de automatización Office omitido.")
 
             return excel_path
 
@@ -666,7 +1021,279 @@ class MainWindow(QMainWindow):
             return None
 
     def generate_word(self):
+        """Genera Word y PDF en la misma carpeta del Excel para todos los clientes (NUEVO)."""
+        # VALIDACIÓN DE SEGURIDAD
+        ruta_proyecto = self.path_input.text().strip()
+        if not os.path.isdir(ruta_proyecto):
+            QMessageBox.warning(self, "Error de Ubicación",
+                                "La ruta de destino no es válida. Seleccione una carpeta primero.")
+            return None
+        try:
+            # 1. Validaciones e inicio
+            if self.activities_table.rowCount() == 0:
+                QMessageBox.warning(self, "Error", "Agregue actividades.")
+                return
+
+            excel_path = self.generate_excel(show_message=False)
+            if not excel_path: return
+
+            # --- CLAVE: Obtener la ruta de la carpeta donde se guardó el Excel ---
+            target_dir = os.path.dirname(os.path.abspath(excel_path))
+            client_type = self.tipo_combo.currentText().lower()
+
+            # 2. Diálogo de configuración
+            # Pasamos datos de precarga para que los campos no salgan vacíos
+            client_name = self.nombre_input.text()
+            precarga_data = {
+                'referencia': f"Cotización para {client_name}",
+                'titulo': f"COTIZACIÓN DE SERVICIOS PARA {client_name.upper()}",
+                'lugar': self.direccion_input.text(),
+                'concepto': "Servicios especializados según especificaciones técnicas."
+            }
+
+            dialog = ImprovedWordConfigDialog(self, client_type=client_type, precarga_data=precarga_data)
+
+            if dialog.exec_() == QDialog.Accepted:
+                config = dialog.get_config()
+                QApplication.setOverrideCursor(Qt.WaitCursor)
+                
+                # Definir formato
+                if config.get('client_type') == 'juridica':
+                    if config.get('cotizacion_basica'):
+                        formato = 'corto'
+                    else:
+                        formato = 'largo'
+                else:
+                    formato = 'corto'
+                
+                # 3. Preparar datos para el WordController
+                datos_para_word = {
+                    'referencia': config.get('referencia'),
+                    'titulo': config.get('titulo'),
+                    'lugar': config.get('lugar'),
+                    'concepto': config.get('concepto'),
+                    'validez': str(config.get('validez', '30')),
+                    'cuadrillas': str(config.get('cuadrillas', '1')),
+                    'operarios': str(config.get('operarios_num', '2')),
+                    'operarios_letra': config.get('operarios_letra', ''),
+                    'plazo_dias': config.get('plazo_dias', '15'),
+                    'plazo_tipo': config.get('plazo_tipo', 'calendario'),
+                    
+                    # Forma de Pago Completa
+                    'pago_contraentrega': config.get('pago_contraentrega'),
+                    'pago_porcentajes': config.get('pago_porcentajes'),
+                    'anticipo': config.get('anticipo', 0),
+                    'avance': config.get('avance', 0),
+                    'avance_requerido': config.get('avance_requerido', 50),
+                    'final': config.get('final', 0),
+                    'pago_personalizado': config.get('pago_personalizado'),
+                    
+                    # Pólizas y Personal
+                    'polizas_incluir': config.get('polizas_incluir', {}),
+                    'director_obra': config.get('director_obra', ''),
+                    'residente_obra': config.get('residente_obra', ''),
+                    'tecnologo': config.get('tecnologo_sgsst', '') 
+                }
+
+                word_controller = WordController(self.cotizacion_controller)
+                
+                # Forzar formato largo si es jurídica y no básica
+                if client_type == 'juridica' and not config.get('cotizacion_basica'):
+                    formato = 'largo'
+
+                # --- NAMING CONVENTION ---
+                # COT-{ID}_{CLIENTE}_{PROYECTO}_{YYYYMMDD_HHMMSS}
+                import re
+                id_cot = self.get_current_cotizacion_id()
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                
+                cliente_clean = re.sub(r'[^\w\-_\. ]', '', client_name).strip().replace(' ', '_')
+                proyecto_raw = config.get('lugar', 'General')
+                proyecto_clean = re.sub(r'[^\w\-_\. ]', '', proyecto_raw).strip().replace(' ', '_')
+                
+                base_name = f"COT-{id_cot}_{cliente_clean}_{proyecto_clean}_{timestamp}"
+                
+                # Rutas Finales
+                word_proposal_path = os.path.join(target_dir, f"{base_name}_Propuesta.docx")
+                pdf_proposal_path = os.path.join(target_dir, f"{base_name}_Propuesta.pdf")
+                pdf_budget_path = os.path.join(target_dir, f"{base_name}_Presupuesto.pdf")
+                pdf_merged_path = os.path.join(target_dir, f"{base_name}_COMPLETO.pdf")
+
+                # --- PASO A: Generar Word de Propuesta Técnica ---
+                temp_word_path = word_controller.generate_word_document(
+                    cotizacion_id=id_cot,
+                    excel_path=excel_path,
+                    datos_adicionales=datos_para_word,
+                    formato=formato
+                )
+                
+                # Mover y renombrar
+                import shutil
+                if os.path.exists(temp_word_path):
+                    shutil.move(temp_word_path, word_proposal_path)
+
+                # --- PASO B: Conversión a PDF Independiente (Propuesta y Presupuesto) ---
+                automator = ExcelToWordAutomation()
+                
+                # 1. Convertir Word Propuesta a PDF
+                success_word, msg_word = automator.convert_word_to_pdf(word_proposal_path, pdf_proposal_path)
+                
+                # 2. Buscar el PDF del presupuesto existente (ya generado por generate_excel)
+                # El patrón es: juridico_{nombre_excel}.pdf
+                excel_basename = os.path.splitext(os.path.basename(excel_path))[0]
+                existing_budget_pdf = os.path.join(target_dir, f"juridico_{excel_basename}.pdf")
+                
+                success_excel = False
+                msg_excel = ""
+                
+                if os.path.exists(existing_budget_pdf):
+                    # Reutilizar el PDF existente, solo renombrarlo si es necesario
+                    if existing_budget_pdf != pdf_budget_path:
+                        import shutil
+                        shutil.copy2(existing_budget_pdf, pdf_budget_path)
+                    success_excel = True
+                    msg_excel = f"Reutilizando presupuesto existente: {os.path.basename(existing_budget_pdf)}"
+                else:
+                    # Si no existe, convertir el Excel a PDF
+                    success_excel, msg_excel = automator.convert_excel_to_pdf(excel_path, pdf_budget_path)
+
+                exito = success_word and success_excel
+                mensaje = ""
+                if not success_word: mensaje += f"Error Word: {msg_word}\n"
+                if not success_excel: mensaje += f"Error Excel: {msg_excel}\n"
+
+                # --- PASO C: Merging de PDFs (Solo Jurídica Completa) ---
+                final_output = pdf_proposal_path # Default fallback
+                
+                if client_type == 'juridica' and config.get('cotizacion_completa'):
+                    if exito:
+                        try:
+                            from utils.pdf_merger import PDFMerger
+                            templates_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data', 'templates')
+                            merger = PDFMerger(templates_dir)
+                            
+                            # Preparar lista de orden
+                            raw_order = config.get('section_order', [])
+                            final_order = []
+                            external_map = {}
+                            
+                            # Mapear "propuesta_tecnica" a nuestro pdf generado
+                            # Mapear "presupuesto_programacion" a nuestro pdf generado
+                            
+                            # IMPORTANTE: Si 'propuesta_tecnica' no está en la lista (configuracion anterior),
+                            # la insertamos manualmente antes de 'paginas_estandar' o al inicio.
+                            if 'propuesta_tecnica' not in raw_order:
+                                if 'paginas_estandar' in raw_order:
+                                    idx = raw_order.index('paginas_estandar')
+                                    raw_order.insert(idx, 'propuesta_tecnica')
+                                else:
+                                    raw_order.insert(1, 'propuesta_tecnica') # Despues de portadas/separadores
+                            
+                            # Procesar lista
+                            for item in raw_order:
+                                if item.startswith("external::"):
+                                    path = item.replace("external::", "")
+                                    if os.path.exists(path):
+                                        key = f"ext_{os.path.basename(path)}"
+                                        external_map[key] = path
+                                        final_order.append(key)
+                                else:
+                                    final_order.append(item)
+                                    
+                            # Mapa de archivos especiales
+                            # 'generated_quotation_pdf' se usa para el presupuesto en pdf_merger
+                            # Para la propuesta técnica, la pasaremos como external map
+                            if 'propuesta_tecnica' in final_order:
+                                external_map['propuesta_tecnica'] = pdf_proposal_path
+
+                            # Ejecutar Merge
+                            merge_success = merger.merge_pdfs(
+                                output_path=pdf_merged_path,
+                                ordered_items=final_order,
+                                generated_quotation_pdf=pdf_budget_path,
+                                external_files_map=external_map
+                            )
+                            
+                            if merge_success:
+                                final_output = pdf_merged_path
+                                QMessageBox.information(self, "Éxito", f"Cotización Generada Correctamente:\n{os.path.basename(final_output)}")
+                            else:
+                                QMessageBox.warning(self, "Error Parcial", "Se generaron los PDFs individuales pero falló la unión.")
+                                
+                        except Exception as e:
+                            QMessageBox.critical(self, "Error Merging", f"Error crítico uniendo PDFs: {e}")
+                            print(f"Merge error: {e}")
+                    else:
+                         QMessageBox.warning(self, "Error Conversión", f"Error generando PDFs base:\n{mensaje}")
+                else:
+                    # Caso Natural o Jurídica Básica (Solo Word o archivos sueltos)
+                     if exito:
+                        QMessageBox.information(self, "Éxito", f"Archivos generados correctamente.\nWord: {os.path.basename(word_proposal_path)}")
+                     else:
+                        QMessageBox.warning(self, "Error", f"Falló la generación: {mensaje}")
+
+                self.last_generated_pdf = final_output
+                
+                # ===== SAVE TO DATABASE =====
+                try:
+                    # Determine which PDF to save as main
+                    main_pdf = final_output if final_output else (pdf_proposal_path if os.path.exists(pdf_proposal_path) else None)
+                    
+                    if main_pdf:
+                        quotation_id = self.save_quotation_to_db(
+                            cliente_id=self.client_combo.currentData() if self.client_combo.currentData() else None,
+                            nombre_proyecto=config.get('lugar', 'Proyecto Sin Nombre'),
+                            monto_total=self.get_total_from_labels(),
+                            es_prueba=self.es_prueba_check.isChecked(),
+                            ruta_pdf=main_pdf,
+                            ruta_excel=excel_path,
+                            ruta_word=word_proposal_path if os.path.exists(word_proposal_path) else None,
+                            validez_dias=config.get('validez', 30),
+                            tipo_cliente=client_type,
+                            config=config
+                        )
+                        
+                        if quotation_id:
+                            print(f"\n{'='*60}")
+                            print(f"🎉 COTIZACIÓN GUARDADA EN DASHBOARD")
+                            print(f"{'='*60}")
+                            print(f"ID: COT-{quotation_id:03d}")
+                            print(f"Cliente: {self.nombre_input.text()}")
+                            print(f"Proyecto: {config.get('lugar')}")
+                            print(f"Monto: ${self.get_total_from_labels():,.0f}")
+                            print(f"Tipo: {'🧪 Prueba' if self.es_prueba_check.isChecked() else '📄 Real'}")
+                            print(f"{'='*60}\n")
+                except Exception as e_save:
+                    print(f"⚠ Advertencia: No se pudo guardar en dashboard: {e_save}")
+                    # No mostramos el error al usuario, la cotización se generó bien
+                
+                QApplication.restoreOverrideCursor()
+
+        except Exception as e:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.critical(self, "Error", f"Error crítico: {str(e)}")
+            import traceback
+            traceback.print_exc()
+
+    def get_total_from_labels(self):
+        """Extrae el monto total de la etiqueta para guardar en BD"""
+        try:
+            total_text = self.total_label.text()
+            # Remover $, comas y espacios, luego convertir
+            total_text = total_text.replace('$', '').replace(',', '').strip()
+            return float(total_text)
+        except Exception as e:
+            print(f"Error extrayendo total: {e}")
+            return 0.0
+
+    def _old_generate_word(self):
         """Genera Word y PDF en la misma carpeta del Excel para todos los clientes."""
+        # VALIDACIÓN DE SEGURIDAD
+        ruta_proyecto = self.path_input.text().strip()
+        if not os.path.isdir(ruta_proyecto):
+            QMessageBox.warning(self, "Error de Ubicación",
+                                "La ruta de destino no es válida. Seleccione una carpeta primero.")
+            return None
         try:
             # 1. Validaciones e inicio
             if self.activities_table.rowCount() == 0:
@@ -695,8 +1322,21 @@ class MainWindow(QMainWindow):
             if dialog.exec_():
                 config = dialog.get_config()
                 QApplication.setOverrideCursor(Qt.WaitCursor)
-
+                # 1. Si es Natural, siempre es corto (según tu requerimiento)
+                if config.get('client_type') == 'juridica':
+                    # Si el usuario marcó "Cotización básica (sin anexos)" en el diálogo
+                    if config.get('cotizacion_basica'):
+                        formato = 'corto'
+                        print("cotizacion juridica corta elegida")
+                    else:
+                        formato = 'largo'
+                        print("cotizacion juridica larga elegida")
+                else:
+                    # Si es natural, según tu requerimiento, siempre es corto
+                    formato = 'corto'
+                    print("cotizacion natural por defecto")
                 # 3. Preparar datos para el WordController
+                # Mapeo completo de todos los campos nuevos
                 datos_para_word = {
                     'referencia': config.get('referencia'),
                     'titulo': config.get('titulo'),
@@ -705,27 +1345,54 @@ class MainWindow(QMainWindow):
                     'validez': str(config.get('validez', '30')),
                     'cuadrillas': str(config.get('cuadrillas', '1')),
                     'operarios': str(config.get('operarios_num', '2')),
-                    'plazo': f"{config.get('plazo_dias')} días {config.get('plazo_tipo')}",
-                    'forma_pago': self._determinar_forma_pago(config)
+                    'operarios_letra': config.get('operarios_letra', ''),
+                    'plazo_dias': config.get('plazo_dias', '15'),
+                    'plazo_tipo': config.get('plazo_tipo', 'calendario'),
+                    
+                    # Forma de Pago Completa
+                    'pago_contraentrega': config.get('pago_contraentrega'),
+                    'pago_porcentajes': config.get('pago_porcentajes'),
+                    'anticipo': config.get('anticipo', 0),
+                    'avance': config.get('avance', 0),
+                    'avance_requerido': config.get('avance_requerido', 50),
+                    'final': config.get('final', 0),
+                    'pago_personalizado': config.get('pago_personalizado'),
+                    
+                    # Pólizas y Personal
+                    'polizas_incluir': config.get('polizas_incluir', {}),
+                    'director_obra': config.get('director_obra', ''),
+                    'residente_obra': config.get('residente_obra', ''),
+                    'tecnologo': config.get('tecnologo_sgsst', '') # Ojo con el nombre de la key
                 }
 
                 word_controller = WordController(self.cotizacion_controller)
                 formato = 'corto' if client_type == "natural" else 'largo'
+                
+                # Forzar formato largo si es jurídica y no básica, para asegurar que use la plantilla correcta si existe
+                if client_type == 'juridica' and not config.get('cotizacion_basica'):
+                    formato = 'largo'
 
                 # --- PASO A: Generar el Word base ---
-                # Nota: Asegúrate de que tu WordController acepte una ruta personalizada o
-                # simplemente mueve el archivo después de generado.
                 temp_word_path = word_controller.generate_word_document(
                     cotizacion_id=self.get_current_cotizacion_id(),
                     excel_path=excel_path,
                     datos_adicionales=datos_para_word,
                     formato=formato
                 )
-
                 # --- PASO B: Definir rutas finales en la carpeta del Excel ---
-                nombre_base = os.path.basename(temp_word_path)
+                # Nuevo Naming Convention: Cotizacion_{ID}_{Edificio}.docx
+                id_cot = self.get_current_cotizacion_id()
+                lugar_raw = config.get('lugar', 'General')
+                # Sanitizar nombre (reemplazar caracteres inválidos)
+                import re
+                lugar_clean = re.sub(r'[^\w\-_\. ]', '_', lugar_raw).strip()
+                nombre_base = f"Cotizacion_{id_cot}_{lugar_clean}.docx"
+                
                 word_final_path = os.path.join(target_dir, nombre_base)
                 pdf_final_path = word_final_path.replace(".docx", ".pdf")
+                
+                # Guardar referencia para envío por correo
+                self.last_generated_pdf = pdf_final_path
 
                 # Mover el archivo generado por el controlador a la carpeta del Excel si es necesario
                 if temp_word_path != word_final_path:
@@ -738,9 +1405,71 @@ class MainWindow(QMainWindow):
                     excel_path, word_final_path, pdf_final_path
                 )
 
+                # --- PASO D: Merging de PDFs (Solo Jurídica) ---
+                if exito and client_type == 'juridica' and config.get('cotizacion_completa'):
+                    budget_pdf_path = None # Inicializar de forma segura
+                    try:
+                        from utils.pdf_merger import PDFMerger
+                        
+                        # 1. El PDF generado hasta ahora es solo el "Presupuesto y Programación"
+                        # Lo renombramos temporalmente para que sea un input más del merge
+                        budget_pdf_path = pdf_final_path.replace(".pdf", "_presupuesto.pdf")
+                        
+                        # Si existe previo por algún error, borrarlo
+                        if os.path.exists(budget_pdf_path): os.remove(budget_pdf_path)
+                        
+                        os.rename(pdf_final_path, budget_pdf_path)
+                        
+                        # 2. Configurar Merger
+                        templates_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data', 'templates')
+                        merger = PDFMerger(templates_dir)
+                        
+                        # 3. Preparar lista de orden y archivos externos
+                        raw_order = config.get('section_order', [])
+                        external_map = {}
+                        
+                        # Procesar externos (que tienen prefijo 'external::')
+                        final_order = []
+                        for item in raw_order:
+                            if item.startswith("external::"):
+                                path = item.replace("external::", "")
+                                if os.path.exists(path):
+                                    # Usamos la ruta completa como clave y valor
+                                    key = f"ext_{os.path.basename(path)}" # Clave simple
+                                    external_map[key] = path
+                                    final_order.append(key)
+                            else:
+                                final_order.append(item)
+
+                        # 4. Unir Todo
+                        # El output será el pdf_final_path original
+                        merge_success = merger.merge_pdfs(
+                            output_path=pdf_final_path,
+                            ordered_items=final_order,
+                            generated_quotation_pdf=budget_pdf_path,
+                            external_files_map=external_map
+                        )
+                        
+                        if merge_success:
+                            mensaje += "\nSECCIONES UNIDAS CORRECTAMENTE."
+                            # Eliminar el presupuesto temporal si se unió bien
+                            if os.path.exists(budget_pdf_path): os.remove(budget_pdf_path)
+                        else:
+                            mensaje += "\nERROR EN LA UNIÓN DE PDFs (Se mantuvo solo presupuesto)."
+                            if os.path.exists(budget_pdf_path):
+                                os.rename(budget_pdf_path, pdf_final_path) # Restaurar
+                            
+                    except Exception as e:
+                        print(f"Error crítico en merging: {e}")
+                        mensaje += f"\nError uniendo archivos: {e}"
+                        # Intentar restaurar
+                        if budget_pdf_path and os.path.exists(budget_pdf_path) and not os.path.exists(pdf_final_path):
+                            os.rename(budget_pdf_path, pdf_final_path)
+
                 QApplication.restoreOverrideCursor()
 
                 if exito:
+                    self.last_generated_pdf = pdf_final_path # Asegurar que email use el merged
                     QMessageBox.information(self, "Éxito",
                                             f"Archivos guardados en: {target_dir}\n\n"
                                             f"1. Excel\n2. Word\n3. PDF")
@@ -885,6 +1614,8 @@ class MainWindow(QMainWindow):
             # Crear ítem de actividad
             desc_item = QTableWidgetItem(row_data['descripcion'])
             desc_item.setData(Qt.UserRole, {'type': 'activity'})
+
+
             self.activities_table.setItem(row_position, 0, desc_item)
 
             # Cantidad
@@ -1420,17 +2151,22 @@ class MainWindow(QMainWindow):
             print(f"Error añadiendo actividad a tabla: {e}")
 
     def send_email(self):
-        """Abre el diálogo para enviar cotización por correo"""
+        """Abre el diálogo para enviar cotización por correo (SMTP integrado)"""
         # Verificar si hay archivos para enviar
         attachments = []
 
+        # Priorizar PDF generado
+        if hasattr(self, 'last_generated_pdf') and self.last_generated_pdf and os.path.exists(self.last_generated_pdf):
+            attachments.append(self.last_generated_pdf)
+        
         # Si hay un Excel generado, añadirlo
         if hasattr(self, 'last_excel_path') and self.last_excel_path and os.path.exists(self.last_excel_path):
             attachments.append(self.last_excel_path)
 
-        # Si hay un Word generado, añadirlo
+        # Si hay un Word generado, añadirlo (si no está ya el PDF)
         if hasattr(self, 'last_word_path') and self.last_word_path and os.path.exists(self.last_word_path):
-            attachments.append(self.last_word_path)
+             if not any(f.endswith('.pdf') for f in attachments): 
+                  attachments.append(self.last_word_path)
 
         # Si no hay archivos, preguntar si desea generar Excel
         if not attachments:
@@ -1445,9 +2181,20 @@ class MainWindow(QMainWindow):
                     return
             else:
                 return
+        
+        # Obtener email del cliente actual de forma segura
+        client_email = ""
+        try:
+            client_id = self.client_combo.currentData()
+            if client_id:
+                client = self.cotizacion_controller.database_manager.get_client_by_id(client_id)
+                if client:
+                    client_email = client.email or ""
+        except Exception as e:
+            print(f"Error recuperando cliente para email: {e}")
 
-        # Abrir diálogo de envío de correo
-        email_dialog = SendEmailDialog(attachments, self)
+        # Abrir diálogo de envío (El diálogo ya maneja el envío internamente con EmailManager)
+        email_dialog = SendEmailDialog(attachments, self, client_email=client_email)
         email_dialog.exec_()
 
     def _load_table_rows_with_headers(self, table_rows):

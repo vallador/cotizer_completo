@@ -115,9 +115,51 @@ class ExcelToWordAutomation:
 
         except Exception as e:
             return False, str(e)
-        finally:
-            if self.excel:
-                self.excel.Quit()
             if self.word:
                 self.word.Quit()
+            pythoncom.CoUninitialize()
+
+    def convert_word_to_pdf(self, word_path, pdf_output_path):
+        """Convierte un documento Word existente a PDF."""
+        try:
+            import pythoncom
+            pythoncom.CoInitialize()
+            
+            self.word = win32.Dispatch("Word.Application")
+            self.word.DisplayAlerts = False
+            self.word.Visible = False
+            
+            doc = self.word.Documents.Open(os.path.abspath(word_path))
+            doc.ExportAsFixedFormat(os.path.abspath(pdf_output_path), 17) # 17 = PDF
+            doc.Close(False)
+            
+            return True, "OK"
+        except Exception as e:
+            return False, str(e)
+        finally:
+            if self.word: self.word.Quit()
+            pythoncom.CoUninitialize()
+
+    def convert_excel_to_pdf(self, excel_path, pdf_output_path):
+        """Convierte la hoja activa de un Excel a PDF."""
+        try:
+            import pythoncom
+            pythoncom.CoInitialize()
+            
+            self.excel = win32.Dispatch("Excel.Application")
+            self.excel.DisplayAlerts = False
+            self.excel.Visible = False
+            
+            wb = self.excel.Workbooks.Open(os.path.abspath(excel_path))
+            ws = wb.ActiveSheet
+            
+            # Exportar a PDF (Type 0 = xlTypePDF)
+            ws.ExportAsFixedFormat(0, os.path.abspath(pdf_output_path))
+            
+            wb.Close(False)
+            return True, "OK"
+        except Exception as e:
+            return False, str(e)
+        finally:
+            if self.excel: self.excel.Quit()
             pythoncom.CoUninitialize()

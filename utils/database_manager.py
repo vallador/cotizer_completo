@@ -2,12 +2,12 @@
 from typing import List, Dict
 
 import sqlite3
+from utils.quotation_manager import QuotationManager
 
 
 
 
-
-class DatabaseManager:
+class DatabaseManager(QuotationManager):
     def __init__(self, db_path="data/cotizaciones.db"): # Ruta corregida para ser más robusta
         self.db_path = db_path
         self.connection = None
@@ -79,6 +79,54 @@ class DatabaseManager:
                     iva_sobre_utilidad REAL
                 )
             """)
+            
+            # ===== NUEVAS TABLAS PARA DASHBOARD Y GESTIÓN =====
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS cotizaciones_generadas (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    cliente_id INTEGER,
+                    fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    fecha_modificacion DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    nombre_proyecto TEXT NOT NULL,
+                    monto_total REAL NOT NULL,
+                    estado TEXT DEFAULT 'pendiente',
+                    es_prueba BOOLEAN DEFAULT 0,
+                    ruta_pdf TEXT,
+                    ruta_excel TEXT,
+                    ruta_word TEXT,
+                    notas TEXT,
+                    validez_dias INTEGER DEFAULT 30,
+                    fecha_vencimiento DATE,
+                    tipo_cliente TEXT,
+                    FOREIGN KEY (cliente_id) REFERENCES clientes(id)
+                )
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS historial_cotizacion (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    cotizacion_id INTEGER NOT NULL,
+                    fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    accion TEXT NOT NULL,
+                    usuario TEXT,
+                    notas TEXT,
+                    FOREIGN KEY (cotizacion_id) REFERENCES cotizaciones_generadas(id) ON DELETE CASCADE
+                )
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS cotizaciones_snapshot (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    cotizacion_id INTEGER NOT NULL,
+                    fecha_snapshot DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    datos_json TEXT NOT NULL,
+                    table_rows_json TEXT NOT NULL,
+                    config_json TEXT,
+                    FOREIGN KEY (cotizacion_id) REFERENCES cotizaciones_generadas(id) ON DELETE CASCADE
+                )
+            """)
+            
             self.connection.commit()
             print("Tablas verificadas/creadas correctamente.")
 

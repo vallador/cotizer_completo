@@ -1,6 +1,6 @@
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QFormLayout, QCheckBox, \
-    QMessageBox, QFileDialog, QGroupBox, QComboBox
-from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QFormLayout, 
+                             QMessageBox, QGroupBox, QScrollArea, QWidget, QCheckBox)
+from PyQt5.QtGui import QFont
 from utils.email_manager import EmailManager
 import os
 
@@ -103,22 +103,27 @@ class EmailConfigDialog(QDialog):
 
 
 class SendEmailDialog(QDialog):
-    def __init__(self, attachments=None, parent=None):
+    def __init__(self, attachments=None, parent=None, client_email=""):
         super().__init__(parent)
         self.setWindowTitle("Enviar Cotización por Correo")
-        self.setMinimumWidth(500)
+        self.setMinimumWidth(600)
+        self.resize(600, 500)
 
         # Crear gestor de correo
         self.email_manager = EmailManager()
         self.attachments = attachments or []
+        self.checkboxes = []
 
         # Crear layout principal
         main_layout = QVBoxLayout(self)
 
-        # Formulario de correo
+        # --- SECCIÓN 1: Formulario de Correo ---
+        form_group = QGroupBox("Detalles del Correo")
         form_layout = QFormLayout()
 
-        self.to_input = QLineEdit(', '.join(self.email_manager.config['default_recipients']))
+        # Usar correo del cliente si está disponible, si no, el default
+        destinatarios = client_email if client_email else ', '.join(self.email_manager.config['default_recipients'])
+        self.to_input = QLineEdit(destinatarios)
         self.subject_input = QLineEdit(self.email_manager.config['default_subject'])
         self.message_input = QLineEdit(self.email_manager.config['default_message'])
 
@@ -126,58 +131,84 @@ class SendEmailDialog(QDialog):
         form_layout.addRow("Asunto:", self.subject_input)
         form_layout.addRow("Mensaje:", self.message_input)
 
-        main_layout.addLayout(form_layout)
+        form_group.setLayout(form_layout)
+        main_layout.addWidget(form_group)
 
-        # Sección de archivos adjuntos
+        # --- SECCIÓN 2: Selección de Adjuntos ---
         attachments_group = QGroupBox("Archivos Adjuntos")
         attachments_layout = QVBoxLayout()
+        
+        # Área de scroll para adjuntos
+        scroll = QScrollArea()
+        scroll_widget = QWidget()
+        scroll_inner = QVBoxLayout()
+        scroll_inner.setContentsMargins(0, 0, 0, 0)
 
-        # Mostrar archivos adjuntos actuales
-        for attachment in self.attachments:
-            attachments_layout.addWidget(QLabel(os.path.basename(attachment)))
-
-        # Botón para agregar más archivos
-        add_attachment_btn = QPushButton("Agregar Archivo Adjunto")
-        add_attachment_btn.clicked.connect(self.add_attachment)
-        attachments_layout.addWidget(add_attachment_btn)
-
+        if not self.attachments:
+            scroll_inner.addWidget(QLabel("No hay archivos adjuntos disponibles."))
+        else:
+            title_lbl = QLabel("Seleccione los archivos a enviar:")
+            title_lbl.setStyleSheet("font-weight: bold; color: #555;")
+            scroll_inner.addWidget(title_lbl)
+            
+            for path in self.attachments:
+                if os.path.exists(path):
+                    filename = os.path.basename(path)
+                    cb = QCheckBox(filename)
+                    cb.setChecked(True) # Por defecto todos marcados
+                    cb.setProperty("file_path", path)
+                    cb.setToolTip(path)
+                    self.checkboxes.append(cb)
+                    scroll_inner.addWidget(cb)
+        
+        scroll_inner.addStretch()
+        scroll_widget.setLayout(scroll_inner)
+        scroll.setWidget(scroll_widget)
+        scroll.setWidgetResizable(True)
+        scroll.setMaximumHeight(150) # Limitar altura
+        
+        attachments_layout.addWidget(scroll)
         attachments_group.setLayout(attachments_layout)
         main_layout.addWidget(attachments_group)
 
-        # Botones de acción
+        # --- SECCIÓN 3: Botones ---
         buttons_layout = QHBoxLayout()
 
-        self.config_btn = QPushButton("Configuración")
+        self.config_btn = QPushButton("Configuración SMTP")
         self.config_btn.clicked.connect(self.open_config)
 
-        self.send_btn = QPushButton("Enviar")
+        self.send_btn = QPushButton("Enviar Correo")
         self.send_btn.clicked.connect(self.send_email)
+        self.send_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
 
         self.cancel_btn = QPushButton("Cancelar")
         self.cancel_btn.clicked.connect(self.reject)
 
         buttons_layout.addWidget(self.config_btn)
-        buttons_layout.addWidget(self.send_btn)
+        buttons_layout.addStretch()
         buttons_layout.addWidget(self.cancel_btn)
+        buttons_layout.addWidget(self.send_btn)
 
         main_layout.addLayout(buttons_layout)
-
-    def add_attachment(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Seleccionar Archivo", "", "Todos los Archivos (*)")
-        if file_path:
-            self.attachments.append(file_path)
-            # Actualizar la lista de archivos adjuntos
-            layout = self.findChild(QGroupBox, "").layout()
-            layout.insertWidget(layout.count() - 1, QLabel(os.path.basename(file_path)))
 
     def open_config(self):
         config_dialog = EmailConfigDialog(self)
         if config_dialog.exec_() == QDialog.Accepted:
             # Recargar configuración
             self.email_manager = EmailManager()
-            self.to_input.setText(', '.join(self.email_manager.config['default_recipients']))
+            # No sobreescribimos el destinatario si ya había uno puesto manualmente
+            if not self.to_input.text():
+                 self.to_input.setText(', '.join(self.email_manager.config['default_recipients']))
             self.subject_input.setText(self.email_manager.config['default_subject'])
             self.message_input.setText(self.email_manager.config['default_message'])
+
+    def get_selected_attachments(self):
+        """Devuelve la lista de rutas de archivo seleccionadas."""
+        selected_paths = []
+        for cb in self.checkboxes:
+            if cb.isChecked():
+                selected_paths.append(cb.property("file_path"))
+        return selected_paths
 
     def send_email(self):
         # Obtener destinatarios
@@ -186,14 +217,17 @@ class SendEmailDialog(QDialog):
             QMessageBox.warning(self, "Error", "Debe especificar al menos un destinatario.")
             return
 
+        # Obtener adjuntos seleccionados
+        selected_attachments = self.get_selected_attachments()
+
         # Enviar correo
         if self.email_manager.send_email(
                 recipients=recipients,
                 subject=self.subject_input.text(),
                 message=self.message_input.text(),
-                attachments=self.attachments
+                attachments=selected_attachments
         ):
             QMessageBox.information(self, "Éxito", "Correo enviado correctamente.")
             self.accept()
         else:
-            QMessageBox.critical(self, "Error", "No se pudo enviar el correo. Verifique la configuración.")
+            QMessageBox.critical(self, "Error", "No se pudo enviar el correo. Verifique la configuración (SMTP).")

@@ -5,7 +5,7 @@ from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
                              QDateEdit, QSpinBox, QFileDialog, QListWidget,
                              QMessageBox, QTabWidget, QGridLayout)
 from PyQt5.QtCore import QDate, Qt
-from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QFont, QColor
 import os
 
 
@@ -335,52 +335,64 @@ class ImprovedWordConfigDialog(QDialog):
         secciones_group = QGroupBox("Secciones a Incluir")
         secciones_form = QVBoxLayout()
 
-        # Lista de secciones disponibles
+        # Lista de secciones disponibles (Clave, Nombre, Archivo/Tipo)
         self.secciones_checks = {}
-        secciones = [
+        # NOTA: 'carta_presentacion' Eliminada según solicitud
+        self.secciones_definitions = [
             ("portadas", "Portadas"),
-            ("contenido_separadores", "Contenido de separadores"),
-            ("carta_presentacion", "Carta de presentación"),
-            ("paginas_estandar", "Páginas estándar (pólizas, personal, director de obra)"),
+            ("contenido_separadores", "Contenido (Separadores)"),
+            ("propuesta_tecnica", "Propuesta Técnica (Word)"),
+            ("presupuesto_programacion", "Presupuesto y Programación (Generado)"),
+            ("paginas_estandar", "Páginas estándar"),
             ("cuadro_experiencia", "Cuadro de experiencia"),
-            ("certificados_trabajos", "Certificados de trabajos similares"),
-            ("seguridad_alturas", "Información de seguridad de alturas"),
-            ("programa_prevencion", "Resumen del programa de prevención y protección contra caídas"),
-            ("sgsst_certificado", "Estándares mínimos de SGSST certificado ministerio"),
-            ("presupuesto_programacion", "Presupuesto de obra y programación de obra"),
-            ("documentacion_legal", "Documentación legal y financiera"),
+            ("certificados_trabajos", "Certificados"),
+            ("seguridad_alturas", "Seguridad en alturas"),
+            ("programa_prevencion", "Programa prevención caídas"),
+            ("sgsst_certificado", "Estándares SGSST"),
+            ("documentacion_legal", "Documentación legal"),
             ("anexos", "Anexos")
         ]
 
-        for key, label in secciones:
+        # Checkboxes (lado izquierdo)
+        for key, label in self.secciones_definitions:
             check = QCheckBox(label)
-            check.setChecked(True)  # Por defecto todas marcadas
+            # Por defecto todas marcadas excepto anexos opcionales si se requiere
+            check.setChecked(True)  
+            check.stateChanged.connect(self.update_order_list_from_checks)
             self.secciones_checks[key] = check
             secciones_form.addWidget(check)
 
         secciones_group.setLayout(secciones_form)
-        secciones_layout.addWidget(secciones_group)
+        
+        # --- NUEVO: Lista de Orden (Drag & Drop) ---
+        ordering_group = QGroupBox("Orden del PDF Final (Arrastrar para reordenar)")
+        ordering_layout = QVBoxLayout()
 
-        # Archivos a combinar
-        archivos_group = QGroupBox("Archivos Preexistentes a Combinar")
-        archivos_layout = QVBoxLayout()
+        self.order_list = QListWidget()
+        self.order_list.setDragDropMode(QListWidget.InternalMove)
+        self.order_list.setSelectionMode(QListWidget.SingleSelection)
+        ordering_layout.addWidget(self.order_list)
+        
+        ordering_group.setLayout(ordering_layout)
 
-        archivos_buttons_layout = QHBoxLayout()
-        self.seleccionar_archivos_btn = QPushButton("Seleccionar Archivos")
-        self.seleccionar_archivos_btn.clicked.connect(self.select_files)
-        archivos_buttons_layout.addWidget(self.seleccionar_archivos_btn)
+        # Layout horizontal para Checks + Lista
+        h_layout = QHBoxLayout()
+        h_layout.addWidget(secciones_group)
+        h_layout.addWidget(ordering_group)
+        secciones_layout.addLayout(h_layout)
 
-        self.limpiar_archivos_btn = QPushButton("Limpiar Lista")
-        self.limpiar_archivos_btn.clicked.connect(self.clear_files)
-        archivos_buttons_layout.addWidget(self.limpiar_archivos_btn)
+        # Archivos a combinar (Botones abajo)
+        archivos_group = QGroupBox("Archivos Externos Adicionales")
+        archivos_layout = QHBoxLayout()
 
-        archivos_buttons_layout.addStretch()
-        archivos_layout.addLayout(archivos_buttons_layout)
+        self.seleccionar_archivos_btn = QPushButton("Agregar Archivo Externo")
+        self.seleccionar_archivos_btn.clicked.connect(self.add_external_file)
+        archivos_layout.addWidget(self.seleccionar_archivos_btn)
 
-        self.archivos_list = QListWidget()
-        self.archivos_list.setMaximumHeight(100)
-        archivos_layout.addWidget(self.archivos_list)
-
+        self.limpiar_archivos_btn = QPushButton("Remover Item Seleccionado")
+        self.limpiar_archivos_btn.clicked.connect(self.remove_selected_item)
+        archivos_layout.addWidget(self.limpiar_archivos_btn)
+        
         archivos_group.setLayout(archivos_layout)
         secciones_layout.addWidget(archivos_group)
 
@@ -426,6 +438,7 @@ class ImprovedWordConfigDialog(QDialog):
         personal_group.setLayout(personal_form)
         secciones_layout.addWidget(personal_group)
 
+        # Finalizar Layouts
         self.secciones_widget.setLayout(secciones_layout)
         layout.addWidget(self.secciones_widget)
 
@@ -439,6 +452,42 @@ class ImprovedWordConfigDialog(QDialog):
         tab.setLayout(tab_layout)
 
         self.tab_widget.addTab(tab, "Configuración Específica")
+
+        # Inicializar lista
+        self.update_order_list_from_checks()
+
+    def update_order_list_from_checks(self):
+        """Sincroniza la lista de orden con los checkboxes marcados, manteniendo orden existente."""
+        current_items = {}
+        for i in range(self.order_list.count()):
+            item = self.order_list.item(i)
+            key = item.data(Qt.UserRole)
+            current_items[key] = item # Guardar referencia
+
+        # Solo procesamos las secciones estándar (no archivos externos)
+        # Definimos 'external_file' como prefijo para los externos
+        
+        # 1. Agregar nuevos marcados
+        for key, label in self.secciones_definitions:
+            if self.secciones_checks[key].isChecked():
+                if key not in current_items:
+                    # Agregar al final
+                    from PyQt5.QtWidgets import QListWidgetItem
+                    item = QListWidgetItem(label)
+                    item.setData(Qt.UserRole, key)
+                    # Colorear diferente la parte generada
+                    if key == "presupuesto_programacion":
+                        item.setBackground(QColor("#e6f3ff")) # Azul claro
+                    elif key == "contenido_separadores":
+                        item.setBackground(QColor("#fff0e6")) # Naranja claro
+                    elif key == "propuesta_tecnica":
+                        item.setBackground(QColor("#e6ffe6")) # Verde muy claro
+                    self.order_list.addItem(item)
+            else:
+                # 2. Remover desmarcados
+                if key in current_items:
+                    row = self.order_list.row(current_items[key])
+                    self.order_list.takeItem(row)
 
     def toggle_payment_details(self):
         """Activa/desactiva los detalles de pago por porcentajes"""
@@ -458,29 +507,42 @@ class ImprovedWordConfigDialog(QDialog):
             self.secciones_widget.setEnabled(False)
             self.cotizacion_completa_radio.setChecked(False)
 
-    def select_files(self):
-        """Selecciona archivos para combinar"""
+    def add_external_file(self):
+        """Agrega un archivo externo a la lista de orden."""
         files, _ = QFileDialog.getOpenFileNames(
-            self,
-            "Seleccionar archivos para combinar",
-            "",
-            "Documentos (*.pdf *.docx *.doc);;Todos los archivos (*)"
+            self, "Seleccionar archivos", "", "PDF Files (*.pdf);;All Files (*)"
         )
-
         if files:
-            self.selected_files.extend(files)
-            self.update_files_list()
+            from PyQt5.QtWidgets import QListWidgetItem
+            for f in files:
+                name = os.path.basename(f)
+                item = QListWidgetItem(f"[EXT] {name}")
+                item.setData(Qt.UserRole, f"external::{f}") # Guardar ruta completa
+                item.setToolTip(f)
+                item.setBackground(QColor("#f0fff0")) # Verde claro
+                self.order_list.addItem(item)
 
-    def clear_files(self):
-        """Limpia la lista de archivos seleccionados"""
-        self.selected_files.clear()
-        self.update_files_list()
+    def remove_selected_item(self):
+        """Remueve el item seleccionado de la lista (y desmarca checkbox si aplica)."""
+        row = self.order_list.currentRow()
+        if row >= 0:
+            item = self.order_list.item(row)
+            key = item.data(Qt.UserRole)
+            
+            # Si es una sección estándar, desmarcar checkbox
+            if not key.startswith("external::") and key in self.secciones_checks:
+                self.secciones_checks[key].setChecked(False)
+            else:
+                # Si es externo, solo borrar
+                self.order_list.takeItem(row)
 
-    def update_files_list(self):
-        """Actualiza la lista visual de archivos"""
-        self.archivos_list.clear()
-        for file_path in self.selected_files:
-            self.archivos_list.addItem(os.path.basename(file_path))
+    def get_order_list(self):
+        """Retorna la lista ordenada de claves/rutas."""
+        order = []
+        for i in range(self.order_list.count()):
+            item = self.order_list.item(i)
+            order.append(item.data(Qt.UserRole))
+        return order
 
     def load_default_values(self):
         """Carga valores por defecto"""
@@ -572,12 +634,13 @@ class ImprovedWordConfigDialog(QDialog):
                 'incluir_materiales': self.incluir_materiales_check.isChecked()
             })
 
-        # Configuración específica para persona jurídica
+            # Configuración específica para persona jurídica
         elif self.client_type == 'juridica':
             config.update({
                 'cotizacion_completa': self.cotizacion_completa_radio.isChecked(),
                 'cotizacion_basica': self.cotizacion_basica_radio.isChecked(),
                 'secciones_incluir': {key: check.isChecked() for key, check in self.secciones_checks.items()},
+                'section_order': self.get_order_list(), # NUEVO: Orden definido por el usuario
                 'polizas_incluir': {key: check.isChecked() for key, check in self.polizas_checks.items()},
                 'director_obra': self.director_obra_edit.text().strip(),
                 'residente_obra': self.residente_obra_edit.text().strip(),
@@ -586,20 +649,4 @@ class ImprovedWordConfigDialog(QDialog):
 
         return config
 
-
-# Ejemplo de uso
-if __name__ == '__main__':
-    from PyQt5.QtWidgets import QApplication
-
-    app = QApplication(sys.argv)
-
-    # Probar con cliente jurídico
-    dialog = ImprovedWordConfigDialog(client_type='juridica')
-    if dialog.exec_():
-        config = dialog.get_config()
-        print("Configuración obtenida:")
-        for key, value in config.items():
-            print(f"  {key}: {value}")
-
-    sys.exit(app.exec_())
 
